@@ -1,6 +1,6 @@
 // Web version of app/src/components/TextComposer.tsx: the same sheet, sitting on an iPhone-style keyboard drawn
 // by the app (browsers have no on-screen keyboard to ride on). Typing on the computer's keyboard works too.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Text, TextInput } from '@/components/Text';
@@ -11,6 +11,26 @@ import { press } from '@/lib/press';
 import { IOSKeyboard } from '@/web/IOSKeyboard';
 
 export const TEXT_LIMIT = 150;
+// running inside the desktop landing page's phone frame
+const IN_FRAME = typeof window !== 'undefined' && window.self !== window.top;
+
+/** How much of the page the phone's own keyboard covers (0 when it's closed), so the sheet can sit on top of it. */
+function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (IN_FRAME || !vv) return;
+    const update = () => setHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+  return height;
+}
 // the typed text's line height (scaled by Text's 1.15 for Gaegu on screen)
 const LINE = 22;
 
@@ -24,6 +44,7 @@ type Props = {
 export function TextComposer({ initial, onSave, onCancel }: Props) {
   const [text, setText] = useState(initial);
   const save = () => onSave(text.trim());
+  const keyboard = useKeyboardHeight();
 
   return (
     <View style={styles.fill} pointerEvents="box-none">
@@ -68,13 +89,18 @@ export function TextComposer({ initial, onSave, onCancel }: Props) {
           </Text>
         </View>
       </View>
-      {/* the phone's keyboard, drawn by the app (the computer's keyboard types too) */}
-      <IOSKeyboard
-        onText={(s) => setText((t) => (t + s).slice(0, TEXT_LIMIT))}
-        onDelete={() => setText((t) => t.slice(0, -1))}
-        onReturn={save}
-        capitalize={text.length === 0 || /[.!?]\s$/.test(text)}
-      />
+      {/* inside the desktop page's phone frame there's no real on-screen keyboard, so one is drawn (the
+          computer's keyboard types too); full screen, as on a phone, the device's own keyboard is used */}
+      {IN_FRAME ? (
+        <IOSKeyboard
+          onText={(s) => setText((t) => (t + s).slice(0, TEXT_LIMIT))}
+          onDelete={() => setText((t) => t.slice(0, -1))}
+          onReturn={save}
+          capitalize={text.length === 0 || /[.!?]\s$/.test(text)}
+        />
+      ) : (
+        <View style={{ height: keyboard }} />
+      )}
     </View>
   );
 }
@@ -106,7 +132,16 @@ const styles = StyleSheet.create({
   },
   // a fixed line height, so the box keeps exactly the same height while you type (it only grows a line at a time)
   // (no browser focus outline: the field's own box already shows where you type)
-  input: { flex: 1, fontSize: 18, lineHeight: LINE, minHeight: LINE * 1.15, maxHeight: 120, paddingTop: 0, paddingBottom: 0, outlineStyle: 'none' as 'solid' },
+  input: {
+    flex: 1,
+    fontSize: 18,
+    lineHeight: LINE,
+    minHeight: LINE * 1.15,
+    maxHeight: 120,
+    paddingTop: 0,
+    paddingBottom: 0,
+    outlineStyle: 'none' as 'solid',
+  },
   // fixed width, wide enough for "150/150" on one line: Gaegu's digits differ in width, and a counter that grows or
   // shrinks would make the text re-wrap
   counter: { width: 64, textAlign: 'right', fontSize: 13, color: '#8e8e93' },
