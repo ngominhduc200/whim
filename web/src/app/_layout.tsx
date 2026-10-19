@@ -99,17 +99,18 @@ function StatusBar() {
       </View>
       <View style={styles.island} />
       <View style={styles.statusSide}>
-        <svg width="68" height="13" viewBox="0 0 68 13" aria-hidden>
+        <svg width="65" height="13" viewBox="0 0 65 13" aria-hidden>
           {/* signal */}
           {[0, 1, 2, 3].map((i) => (
             <rect key={i} x={i * 5} y={9 - i * 3} width="3.4" height={4 + i * 3} rx="1" fill={INK} />
           ))}
           {/* wifi */}
-          <path d="M31 4.2a9 9 0 0 1 12 0M33.2 6.6a5.8 5.8 0 0 1 7.6 0M35.4 9a2.6 2.6 0 0 1 3.2 0" stroke={INK} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+          {/* wifi and battery shifted so the three sit an even 6pt apart */}
+          <path transform="translate(-5.7 0)" d="M31 4.2a9 9 0 0 1 12 0M33.2 6.6a5.8 5.8 0 0 1 7.6 0M35.4 9a2.6 2.6 0 0 1 3.2 0" stroke={INK} strokeWidth="1.8" fill="none" strokeLinecap="round" />
           {/* battery */}
-          <rect x="47.5" y="1.5" width="17" height="10" rx="3" stroke={INK} strokeOpacity="0.4" fill="none" />
-          <rect x="49.2" y="3.2" width="12" height="6.6" rx="1.6" fill={INK} />
-          <rect x="65.5" y="4.6" width="1.6" height="3.8" rx="0.8" fill={INK} fillOpacity="0.45" />
+          <rect x="44.7" y="1.5" width="17" height="10" rx="3" stroke={INK} strokeOpacity="0.4" fill="none" />
+          <rect x="46.4" y="3.2" width="12" height="6.6" rx="1.6" fill={INK} />
+          <rect x="62.7" y="4.6" width="1.6" height="3.8" rx="0.8" fill={INK} fillOpacity="0.45" />
         </svg>
       </View>
     </View>
