@@ -3,6 +3,7 @@
 import { useContext, useEffect } from 'react';
 import { Asset } from 'expo-asset';
 // eslint-disable-next-line import/no-unresolved
+// @ts-expect-error the web build's internal context has no type declarations
 import MapContext from '@rnmapbox/maps/lib/module/web/MapContext';
 
 import MapboxGL from '@rnmapbox/maps';

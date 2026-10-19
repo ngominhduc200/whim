@@ -106,7 +106,7 @@ const styles = StyleSheet.create({
   },
   // a fixed line height, so the box keeps exactly the same height while you type (it only grows a line at a time)
   // (no browser focus outline: the field's own box already shows where you type)
-  input: { flex: 1, fontSize: 18, lineHeight: LINE, minHeight: LINE * 1.15, maxHeight: 120, paddingTop: 0, paddingBottom: 0, outlineStyle: 'none' },
+  input: { flex: 1, fontSize: 18, lineHeight: LINE, minHeight: LINE * 1.15, maxHeight: 120, paddingTop: 0, paddingBottom: 0, outlineStyle: 'none' as 'solid' },
   // fixed width, wide enough for "150/150" on one line: Gaegu's digits differ in width, and a counter that grows or
   // shrinks would make the text re-wrap
   counter: { width: 64, textAlign: 'right', fontSize: 13, color: '#8e8e93' },

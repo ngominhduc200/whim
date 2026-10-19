@@ -71,7 +71,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     boxShadow: '0 -4px 20px rgba(0,0,0,0.08)',
   },
-  grabberArea: { height: 20, alignItems: 'center', justifyContent: 'center', cursor: 'grab' },
+  grabberArea: { height: 20, alignItems: 'center', justifyContent: 'center', cursor: 'grab' as 'pointer' },
   grabber: { width: 36, height: 5, borderRadius: 3, backgroundColor: 'rgba(60,60,67,0.3)' },
   body: { flex: 1 },
 });

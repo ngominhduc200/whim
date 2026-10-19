@@ -54,21 +54,38 @@ const remember = (p: GeolocationPosition) => (latest = toLocation(p));
 export async function watchPositionAsync(_options: Location.LocationOptions, callback: Location.LocationCallback): Promise<Location.LocationSubscription> {
   const report = (p: GeolocationPosition) => callback(remember(p));
   navigator.geolocation.getCurrentPosition(report, () => {}, { maximumAge: 60_000 });
-  const id = navigator.geolocation.watchPosition(report, () => {}, { enableHighAccuracy: false, maximumAge: 10_000 });
+  const id = navigator.geolocation.watchPosition(report, () => {}, { enableHighAccuracy: false, maximumAge: 60_000 });
   return { remove: () => navigator.geolocation.clearWatch(id) };
 }
 
 // one-off positions through the browser's own geolocation too (expo's web version can hang in Safari)
-const currentPosition = (maximumAge: number) =>
-  latest && Date.now() - latest.timestamp < maximumAge
-    ? Promise.resolve(latest)
-    : new Promise<Location.LocationObject>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition((p) => resolve(remember(p)), reject, { maximumAge, timeout: 10_000 }),
-      );
+// One fix from the browser. On a Mac, Safari finds you from nearby Wi-Fi, which can take a while and sometimes
+// briefly reports "position unknown" before succeeding, so it's given time and a second try.
+const askBrowser = (timeout: number) =>
+  new Promise<Location.LocationObject>((resolve, reject) =>
+    navigator.geolocation.getCurrentPosition((p) => resolve(remember(p)), reject, { maximumAge: Infinity, timeout }),
+  );
 
-// a fix from the last couple of minutes is good enough (a fresh one can take many seconds in a browser)
+const currentPosition = async (maximumAge: number): Promise<Location.LocationObject> => {
+  // the watcher (or an earlier fix) usually already knows where you are
+  if (latest && Date.now() - latest.timestamp < maximumAge) return latest;
+  try {
+    return await askBrowser(20_000);
+  } catch (e) {
+    if ((e as GeolocationPositionError).code === 1) throw e; // permission denied: no point retrying
+    try {
+      return await askBrowser(20_000);
+    } catch (e2) {
+      // the last place you were seen, however old, beats nothing
+      if (latest) return latest;
+      throw e2;
+    }
+  }
+};
+
+// a fix from the last few minutes is good enough (a fresh one can take a while in a browser)
 export async function getCurrentPositionAsync(_options?: Location.LocationOptions) {
-  return currentPosition(120_000);
+  return currentPosition(5 * 60_000);
 }
 
 export async function getLastKnownPositionAsync(options?: Location.LocationLastKnownOptions) {

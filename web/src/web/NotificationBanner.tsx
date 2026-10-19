@@ -55,7 +55,7 @@ export function NotificationBanner() {
           }}
           accessibilityRole="button"
           accessibilityLabel={`whim: ${NEARBY_TEXT}`}
-          style={({ pressed }) => [styles.banner, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.banner, styles.frosted, pressed && styles.pressed]}
         >
           <Image source={require('@/assets/images/app-icon.png')} style={styles.icon} />
           <View style={styles.text}>
@@ -81,11 +81,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 24,
     backgroundColor: 'rgba(245,245,245,0.82)',
-    backdropFilter: 'blur(20px) saturate(180%)',
     boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
     cursor: 'pointer',
   },
   pressed: { transform: [{ scale: 0.98 }] },
+  // (a web-only style, not in React Native's types)
+  frosted: { backdropFilter: 'blur(20px) saturate(180%)' } as object,
   icon: { width: 38, height: 38, borderRadius: 9 },
   text: { flex: 1, gap: 1 },
   titleRow: { flexDirection: 'row', justifyContent: 'space-between' },
