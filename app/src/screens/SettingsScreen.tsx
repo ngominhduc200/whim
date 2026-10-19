@@ -27,7 +27,7 @@ const LATER: { title: string; symbol: SymbolViewProps['name'] }[] = [
  * Settings: the "Moment nearby" notification (a demo: every minute while it's on), the settings to come
  * (disabled), and clearing your posts.
  */
-export function SettingsScreen({ onClose }: { onClose?: () => void } = {}) {
+export function SettingsScreen({ onClose, onContentHeight }: { onClose?: () => void; onContentHeight?: (h: number) => void } = {}) {
   const [notifying, setNotifying] = useState(false);
   useEffect(() => {
     isNearbyRepeatOn().then(setNotifying);
@@ -55,7 +55,12 @@ export function SettingsScreen({ onClose }: { onClose?: () => void } = {}) {
   };
 
   return (
-    <ScrollView style={styles.root} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      onContentSizeChange={(_, h) => onContentHeight?.(h)}
+    >
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
         <Pressable
@@ -114,7 +119,8 @@ export function SettingsScreen({ onClose }: { onClose?: () => void } = {}) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: PAPER },
-  content: { padding: EDGE, paddingTop: 20, gap: 24 },
+  // the same 24pt above the title and below the last row
+  content: { padding: EDGE, gap: 24 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 28, fontWeight: '700' },
   // just the X, in a full tap target, at the right edge
