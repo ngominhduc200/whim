@@ -27,6 +27,8 @@ export function requestForegroundPermissionsAsync(): Promise<Permission> {
         keepTracking();
         rememberGranted('location');
         resolve((decided = perm(true, true)));
+        // the demo's nearby moment, placed once whim knows where you are
+        import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
       },
       (e) => resolve(e.code === e.PERMISSION_DENIED ? (decided = perm(false, false)) : perm(false, true)),
       { timeout: 20_000, maximumAge: 60_000 },

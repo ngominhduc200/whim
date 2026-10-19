@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
@@ -31,7 +31,8 @@ export function NotificationBanner() {
       onBanner(() => {
         setShown(true);
         y.set(HIDDEN);
-        y.set(withSpring(0, { damping: 18, stiffness: 220 }));
+        // slides down and eases to a stop (no bounce)
+        y.set(withTiming(0, { duration: 320, easing: Easing.out(Easing.cubic) }));
         if (timer.current) clearTimeout(timer.current);
         timer.current = setTimeout(hide, SHOW_MS);
       }),

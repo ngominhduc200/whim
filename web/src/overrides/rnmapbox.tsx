@@ -1,6 +1,8 @@
 // The map library on the web, plus what its web version doesn't have yet: `Images` (the textures the doodle
 // layers draw with: road wiggles, waves, flowers, the compass), added straight to the Mapbox map.
-import { forwardRef, useContext, useEffect, useRef, type ComponentProps } from 'react';
+import { forwardRef, useContext, useEffect, useRef, useState, type ComponentProps } from 'react';
+import { Image, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Asset } from 'expo-asset';
 // eslint-disable-next-line import/no-unresolved
 // @ts-expect-error the web build's internal context has no type declarations
@@ -64,5 +66,57 @@ export const MarkerView = forwardRef<unknown, ComponentProps<typeof MapboxGL.Mar
         else if (ref) ref.current = m;
       }}
     />
+  );
+});
+
+// The compass, which the web map doesn't draw: the same hand-drawn needle, at the same spot, turning with the map.
+// It fades out when the map faces north (as compassFadeWhenNorth does on the phone); tap it to face north again.
+type CompassProps = { position?: { top?: number; left?: number; right?: number; bottom?: number }; fadeWhenNorth?: boolean };
+function WebCompass({ position, fadeWhenNorth }: CompassProps) {
+  const { map } = useContext(MapContext) as { map?: any };
+  const [bearing, setBearing] = useState(0);
+  const insets = useSafeAreaInsets();
+  useEffect(() => {
+    if (!map) return;
+    const update = () => setBearing(map.getBearing());
+    update();
+    map.on('rotate', update);
+    return () => map.off('rotate', update);
+  }, [map]);
+  const north = Math.abs(((bearing % 360) + 360) % 360) < 0.5 || Math.abs((((bearing % 360) + 360) % 360) - 360) < 0.5;
+  const hidden = fadeWhenNorth && north;
+  return (
+    <Pressable
+      onPress={() => map?.easeTo({ bearing: 0, duration: 400 })}
+      accessibilityRole="button"
+      accessibilityLabel="Face north"
+      disabled={hidden}
+      style={{
+        position: 'absolute',
+        top: (position?.top ?? 0) + insets.top,
+        left: position?.left,
+        right: position?.right,
+        width: 44,
+        height: 44,
+        opacity: hidden ? 0 : 1,
+        transitionProperty: 'opacity',
+        transitionDuration: '250ms',
+        zIndex: 5,
+      } as object}
+    >
+      <Image source={COMPASS} style={{ width: 44, height: 44, transform: [{ rotate: `${-bearing}deg` }] }} />
+    </Pressable>
+  );
+}
+const COMPASS = require('@/assets/landmarks/compass.png');
+
+const RealMapView = MapboxGL.MapView as unknown as React.ComponentType<Record<string, unknown>>;
+export const MapView = forwardRef<unknown, ComponentProps<typeof MapboxGL.MapView>>(function MapView(props, ref) {
+  const { children, compassEnabled, compassPosition, compassFadeWhenNorth } = props as Record<string, any>;
+  return (
+    <RealMapView {...props} ref={ref}>
+      {children}
+      {compassEnabled !== false && <WebCompass position={compassPosition} fadeWhenNorth={compassFadeWhenNorth} />}
+    </RealMapView>
   );
 });
