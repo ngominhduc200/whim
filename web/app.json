@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "name": "whim",
+    "slug": "whim-web",
+    "scheme": "whim",
+    "platforms": ["web"],
+    "userInterfaceStyle": "light",
+    "web": { "output": "single", "bundler": "metro", "favicon": "../app/assets/images/app-icon.png" },
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": false }
+  }
+}

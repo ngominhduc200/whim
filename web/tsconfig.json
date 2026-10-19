@@ -1,0 +1,26 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/assets/*": [
+        "../app/assets/*"
+      ],
+      "@/web/*": [
+        "./src/web/*"
+      ],
+      "@/*": [
+        "./src/overrides/*",
+        "../app/src/*"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

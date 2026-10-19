@@ -1,0 +1,28 @@
+diff --git a/node_modules/@shopify/react-native-skia/lib/commonjs/Platform/Platform.web.js b/node_modules/@shopify/react-native-skia/lib/commonjs/Platform/Platform.web.js
+index 593dffd..db904d8 100644
+--- a/node_modules/@shopify/react-native-skia/lib/commonjs/Platform/Platform.web.js
++++ b/node_modules/@shopify/react-native-skia/lib/commonjs/Platform/Platform.web.js
+@@ -119,7 +119,8 @@ const View = ({
+       position: "relative",
+       textDecoration: "none",
+       zIndex: 0,
+-      ...style
++      // React Native styles can be arrays; a browser style can't
++      ...(Array.isArray(style) ? Object.assign({}, ...style.flat(Infinity).filter(Boolean)) : style)
+     };
+   }, [style]);
+   return /*#__PURE__*/_react.default.createElement("div", {
+diff --git a/node_modules/@shopify/react-native-skia/lib/module/Platform/Platform.web.js b/node_modules/@shopify/react-native-skia/lib/module/Platform/Platform.web.js
+index 1121801..071e512 100644
+--- a/node_modules/@shopify/react-native-skia/lib/module/Platform/Platform.web.js
++++ b/node_modules/@shopify/react-native-skia/lib/module/Platform/Platform.web.js
+@@ -112,7 +112,8 @@ const View = ({
+       position: "relative",
+       textDecoration: "none",
+       zIndex: 0,
+-      ...style
++      // React Native styles can be arrays; a browser style can't
++      ...(Array.isArray(style) ? Object.assign({}, ...style.flat(Infinity).filter(Boolean)) : style)
+     };
+   }, [style]);
+   return /*#__PURE__*/React.createElement("div", {

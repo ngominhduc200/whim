@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+.env
+.env.*
+!.env.example
+# the original photos the sample photos were made from (personal, 77 MB); the app uses assets/seed-photos
+app/photos/
