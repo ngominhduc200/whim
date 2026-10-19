@@ -50,7 +50,7 @@ const GUIDE_TURN_MS = 1000;
 // where you and the moment end up, as fractions of the screen's height (you just above the capture button)
 const GUIDE_ME_AT = 0.78;
 const GUIDE_IT_AT = 0.2;
-const GUIDE_MAX_ZOOM = 21;
+const GUIDE_MAX_ZOOM = 22;
 // Mapbox's camera: its vertical field of view (the same in every Mapbox map)
 const MAPBOX_FOV = 0.6435011087932844;
 
@@ -105,7 +105,7 @@ const START = { centerCoordinate: [-123.11, 49.28], zoomLevel: 1.6 };
 const LOCATE_ZOOM = 15;
 // how far out and in the map goes, by pinch or by the − / + buttons (out: the whole globe with space around it)
 const MIN_ZOOM = 0.8;
-const MAX_ZOOM = 21;
+const MAX_ZOOM = 22;
 // The map starts at zoom 1.6 and each + adds 1: taps 1–15 (up to 16.6) are always flat and can't be tilted;
 // from tap 16 (17.6) in, the map tilts to 3D on its own.
 const TILT_ZOOM = 17.5;
