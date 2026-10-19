@@ -17,6 +17,10 @@ import { CLOSE_ICON, EDGE, TAP, TOP_BUTTON_TOP, usePhotoFrame } from '@/lib/layo
 import { press } from '@/lib/press';
 import { rememberGranted } from '@/web/permissions';
 
+// a phone's browser uses the back camera, like the app; a computer has only its front (webcam) camera
+const IS_PHONE = typeof navigator !== 'undefined' && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) && navigator.maxTouchPoints > 0;
+const FACING = IS_PHONE ? 'back' : 'front';
+
 export function CameraScreen() {
   const insets = useSafeAreaInsets();
   const frame = usePhotoFrame();
@@ -71,8 +75,11 @@ export function CameraScreen() {
       <StatusBar style="dark" />
       <PhotoFrame frame={frame} matte={PAPER}>
         {granted && focused ? (
-          // the preview shows mirrored (like a mirror), but the photo is saved as the camera sees it, as on an iPhone
-          <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="front" onCameraReady={() => setReady(true)} />
+          // the browser shows a front camera mirrored; it's flipped back here, so the preview matches the photo exactly
+          // (nothing flips when you take it)
+          <View style={[StyleSheet.absoluteFill, FACING === 'front' && styles.unmirror]}>
+            <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing={FACING} onCameraReady={() => setReady(true)} />
+          </View>
         ) : (
           <View style={styles.empty} />
         )}
@@ -97,4 +104,5 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: PAPER },
   close: { position: 'absolute', left: EDGE, width: TAP, height: TAP, justifyContent: 'center' },
   empty: { flex: 1 },
+  unmirror: { transform: [{ scaleX: -1 }] },
 });
