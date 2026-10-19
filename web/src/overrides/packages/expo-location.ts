@@ -20,7 +20,11 @@ export function requestForegroundPermissionsAsync(): Promise<Permission> {
   asking ??= new Promise<Permission>((resolve) => {
     if (!navigator.geolocation) return resolve(perm(false, false));
     navigator.geolocation.getCurrentPosition(
-      () => resolve((decided = perm(true, true))),
+      (p) => {
+        remember(p);
+        keepTracking();
+        resolve((decided = perm(true, true)));
+      },
       (e) => resolve(e.code === e.PERMISSION_DENIED ? (decided = perm(false, false)) : perm(false, true)),
       { timeout: 20_000, maximumAge: 60_000 },
     );
@@ -50,6 +54,14 @@ const toLocation = (p: GeolocationPosition): Location.LocationObject => ({
 // the latest position the browser has given (from the watcher or a one-off), so asking again is instant
 let latest: Location.LocationObject | null = null;
 const remember = (p: GeolocationPosition) => (latest = toLocation(p));
+// once location is allowed, whim keeps track of you in the background, so posting and the locate button never
+// have to wait for Safari to find you from scratch
+let tracking = false;
+function keepTracking() {
+  if (tracking || !navigator.geolocation) return;
+  tracking = true;
+  navigator.geolocation.watchPosition(remember, () => {}, { enableHighAccuracy: false, maximumAge: 60_000 });
+}
 
 export async function watchPositionAsync(_options: Location.LocationOptions, callback: Location.LocationCallback): Promise<Location.LocationSubscription> {
   const report = (p: GeolocationPosition) => callback(remember(p));
@@ -67,25 +79,22 @@ const askBrowser = (timeout: number) =>
   );
 
 const currentPosition = async (maximumAge: number): Promise<Location.LocationObject> => {
-  // the watcher (or an earlier fix) usually already knows where you are
+  // the background watch (or an earlier fix) usually already knows where you are
   if (latest && Date.now() - latest.timestamp < maximumAge) return latest;
+  keepTracking();
   try {
-    return await askBrowser(20_000);
+    return await askBrowser(6_000);
   } catch (e) {
     if ((e as GeolocationPositionError).code === 1) throw e; // permission denied: no point retrying
-    try {
-      return await askBrowser(20_000);
-    } catch (e2) {
-      // the last place you were seen, however old, beats nothing
-      if (latest) return latest;
-      throw e2;
-    }
+    // the last place you were seen, however old, beats waiting
+    if (latest) return latest;
+    return askBrowser(8_000);
   }
 };
 
 // a fix from the last few minutes is good enough (a fresh one can take a while in a browser)
 export async function getCurrentPositionAsync(_options?: Location.LocationOptions) {
-  return currentPosition(5 * 60_000);
+  return currentPosition(10 * 60_000);
 }
 
 export async function getLastKnownPositionAsync(options?: Location.LocationLastKnownOptions) {

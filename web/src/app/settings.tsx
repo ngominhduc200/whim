@@ -10,8 +10,8 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { PAPER } from '@/lib/colors';
 import { SettingsScreen } from '@/screens/SettingsScreen';
 
-// the phone's sheet opens to 60% of the screen
-const DETENT = 0.6;
+// tall enough for every setting without scrolling
+const DETENT = 0.72;
 const OPEN = { damping: 26, stiffness: 260 };
 
 export default function SettingsSheet() {
@@ -54,7 +54,7 @@ export default function SettingsSheet() {
           </View>
         </GestureDetector>
         <View style={styles.body}>
-          <SettingsScreen />
+          <SettingsScreen onClose={() => close()} />
         </View>
       </Animated.View>
     </View>

@@ -1,6 +1,6 @@
 // The map library on the web, plus what its web version doesn't have yet: `Images` (the textures the doodle
 // layers draw with: road wiggles, waves, flowers, the compass), added straight to the Mapbox map.
-import { useContext, useEffect } from 'react';
+import { forwardRef, useContext, useEffect, useRef, type ComponentProps } from 'react';
 import { Asset } from 'expo-asset';
 // eslint-disable-next-line import/no-unresolved
 // @ts-expect-error the web build's internal context has no type declarations
@@ -44,3 +44,25 @@ export function Atmosphere(props: Parameters<typeof RealAtmosphere>[0]) {
   }, [map, styleGeneration, spec]);
   return <RealAtmosphere {...props} />;
 }
+
+// Keeps a "selected" marker (your location cloud) drawn above the others, as it is on the phone (the web map
+// ignores isSelected and stacks markers in the order they were added).
+// (typed loosely: the native MarkerView's types don't declare the ref the web one exposes)
+const RealMarkerView = MapboxGL.MarkerView as unknown as React.ComponentType<Record<string, unknown>>;
+export const MarkerView = forwardRef<unknown, ComponentProps<typeof MapboxGL.MarkerView>>(function MarkerView(props, ref) {
+  const marker = useRef<{ getElement(): HTMLElement } | null>(null);
+  useEffect(() => {
+    const el = marker.current?.getElement();
+    if (el) el.style.zIndex = props.isSelected ? '10' : '';
+  });
+  return (
+    <RealMarkerView
+      {...props}
+      ref={(m: unknown) => {
+        marker.current = m as { getElement(): HTMLElement } | null;
+        if (typeof ref === 'function') ref(m);
+        else if (ref) ref.current = m;
+      }}
+    />
+  );
+});

@@ -27,7 +27,7 @@ const LATER: { title: string; symbol: SymbolViewProps['name'] }[] = [
  * Settings: the "Moment nearby" notification (a demo: every minute while it's on), the settings to come
  * (disabled), and clearing your posts.
  */
-export function SettingsScreen() {
+export function SettingsScreen({ onClose }: { onClose?: () => void } = {}) {
   const [notifying, setNotifying] = useState(false);
   useEffect(() => {
     isNearbyRepeatOn().then(setNotifying);
@@ -59,7 +59,7 @@ export function SettingsScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
         <Pressable
-          onPress={() => router.back()}
+          onPress={onClose ?? (() => router.back())}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Close"
