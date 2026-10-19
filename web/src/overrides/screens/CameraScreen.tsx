@@ -77,9 +77,6 @@ export function CameraScreen() {
                 >
                   <Text style={styles.allowLabel}>Allow camera</Text>
                 </Pressable>
-                <Pressable onPress={pickPhoto} accessibilityRole="button" style={({ pressed }) => pressed && press.dim}>
-                  <Text style={styles.alt}>Choose a photo instead</Text>
-                </Pressable>
               </>
             ) : (
               <Text style={styles.message}>
@@ -112,5 +109,4 @@ const styles = StyleSheet.create({
   message: { color: INK, fontSize: 18, textAlign: 'center' },
   allow: { backgroundColor: ACCENT, borderRadius: TAP / 2, height: TAP, paddingHorizontal: 22, justifyContent: 'center' },
   allowLabel: { color: '#fff', fontSize: 17 },
-  alt: { color: '#8e8e93', fontSize: 16 },
 });

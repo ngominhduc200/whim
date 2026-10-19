@@ -103,6 +103,9 @@ Mapbox.setAccessToken(TOKEN);
 
 const START = { centerCoordinate: [-123.11, 49.28], zoomLevel: 1.6 };
 const LOCATE_ZOOM = 15;
+// how far out and in the map goes, by pinch or by the − / + buttons (out: the whole globe with space around it)
+const MIN_ZOOM = 0.8;
+const MAX_ZOOM = 21;
 // The map starts at zoom 1.6 and each + adds 1: taps 1–15 (up to 16.6) are always flat and can't be tilted;
 // from tap 16 (17.6) in, the map tilts to 3D on its own.
 const TILT_ZOOM = 17.5;
@@ -421,7 +424,7 @@ export function MapScreen() {
   const zoomBy = useCallback(async (delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const zoom = await mapRef.current?.getZoom();
-    if (zoom != null) cameraRef.current?.zoomTo(zoom + delta, 300);
+    if (zoom != null) cameraRef.current?.zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta)), 300);
   }, []);
 
   // Focus: tap 1 centers on you (flat), tap 2 zooms in close (zoom 17, so it tilts to 3D), tap 3 goes back.
@@ -493,7 +496,7 @@ export function MapScreen() {
         logoEnabled={false}
         attributionEnabled={false}
       >
-        <Camera ref={cameraRef} defaultSettings={START} />
+        <Camera ref={cameraRef} defaultSettings={START} minZoomLevel={MIN_ZOOM} maxZoomLevel={MAX_ZOOM} />
         {showPuck && userLocation && !viewingPost && (
           // "selected" keeps your location drawn above the post pins
           <MarkerView coordinate={userLocation} anchor={USER_MARKER_ANCHOR} allowOverlap allowOverlapWithPuck isSelected>
