@@ -5,6 +5,8 @@
 //    web watcher doesn't send updates in Safari).
 import * as Location from 'expo-location';
 
+import { rememberGranted, wasGranted } from '@/web/permissions';
+
 export * from 'expo-location';
 
 // Permission is worked out by simply asking for a position (that's what makes the browser prompt): Safari's
@@ -23,6 +25,7 @@ export function requestForegroundPermissionsAsync(): Promise<Permission> {
       (p) => {
         remember(p);
         keepTracking();
+        rememberGranted('location');
         resolve((decided = perm(true, true)));
       },
       (e) => resolve(e.code === e.PERMISSION_DENIED ? (decided = perm(false, false)) : perm(false, true)),
@@ -100,3 +103,6 @@ export async function getCurrentPositionAsync(_options?: Location.LocationOption
 export async function getLastKnownPositionAsync(options?: Location.LocationLastKnownOptions) {
   return currentPosition(options?.maxAge ?? 60_000).catch(() => null);
 }
+
+// allowed on an earlier visit: start finding you straight away, so the map, posting and the locate button are ready
+if (typeof window !== 'undefined' && wasGranted('location')) requestForegroundPermissionsAsync();
