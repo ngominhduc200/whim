@@ -1,5 +1,5 @@
-// The demo's "Moment nearby", for the notification to point you to: a moment by someone else on a street within
-// 20 m of you, made whenever there isn't one that close (once whim knows where you are, and whenever notifications
+// The demo's "Moment nearby", for the notification to point you to: a moment by someone else on a street about
+// 50 m from you (far enough that the walk to it shows), made whenever there isn't one about that far (once whim knows where you are, and whenever notifications
 // are switched on). On 19th Ave (the demo's street) it's the sunset-street moment, as on the phone; anywhere else,
 // a random sample moment.
 import * as Location from 'expo-location';
@@ -9,9 +9,12 @@ import { makeKit } from '@/data/doodleKit';
 import { SEED_PHOTOS } from '@/data/seedPhotos';
 import { SEED_SCENES } from '@/data/seedScenes';
 import { distanceM, type LngLat } from '@/lib/location';
-import { loadPosts, savePost } from '@/lib/posts';
+import { loadPosts, savePost, updatePost } from '@/lib/posts';
 
-const NEAR = 20;
+// how far the moment is from you: about AWAY m, anywhere from NEAR_MIN to NEAR_MAX
+const AWAY = 50;
+const NEAR_MIN = 42;
+const NEAR_MAX = 58;
 const PHOTO = 19; // p20: the street at sunset with the little convertible
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? '';
 const ON_19TH = /\b19(th)?\b.*\bav/i;
@@ -40,16 +43,15 @@ async function roadSpots(me: LngLat, radius: number, search: number) {
 }
 
 /**
- * Where the moment goes: a spot on a street 8–20 m from you (a "nearby" moment is within 20 m; 8 keeps it clear of
- * your location cloud), on 19th Ave if that's one of them (the street the demo was made on). With no street that
- * close, a random spot 8–20 m away.
+ * Where the moment goes: a spot on a street about 50 m from you, on 19th Ave if that's one of them (the street the
+ * demo was made on). With no street there, a random spot 50 m away.
  */
 async function spotNear(me: LngLat): Promise<{ at: LngLat; on19th: boolean }> {
-  const close = (await roadSpots(me, 14, 8)).filter((h) => h.fromMe >= 8 && h.fromMe <= NEAR);
+  const close = (await roadSpots(me, AWAY, 10)).filter((h) => h.fromMe >= NEAR_MIN && h.fromMe <= NEAR_MAX);
   const on19th = close.filter((h) => ON_19TH.test(h.name));
   if (on19th.length) return { at: on19th[Math.floor(Math.random() * on19th.length)].at, on19th: true };
   if (close.length) return { at: close[Math.floor(Math.random() * close.length)].at, on19th: false };
-  const d = 8 + Math.random() * (NEAR - 8);
+  const d = AWAY;
   const a = Math.random() * Math.PI * 2;
   const mPerDegLng = 111_320 * Math.cos((me[1] * Math.PI) / 180);
   return { at: [me[0] + (Math.sin(a) * d) / mPerDegLng, me[1] + (Math.cos(a) * d) / 111_320], on19th: false };
@@ -62,9 +64,16 @@ export async function ensureNearbyMoment() {
     running = true;
     const pos = await Location.getCurrentPositionAsync();
     const me: LngLat = [pos.coords.longitude, pos.coords.latitude];
-    // there's already a moment within 20 m of where you are now
-    if ((await loadPosts()).some((p) => p.byOthers && distanceM(me, [p.lng, p.lat]) <= NEAR + 2)) return;
+    const others = (await loadPosts()).filter((p) => p.byOthers);
+    const nearest = others.reduce<{ id: string; d: number } | null>((best, p) => {
+      const d = distanceM(me, [p.lng, p.lat]);
+      return !best || d < best.d ? { id: p.id, d } : best;
+    }, null);
+    // there's already one about that far (the closest, so it's the one the notification points to)
+    if (nearest && nearest.d >= NEAR_MIN - 2 && nearest.d <= NEAR_MAX + 2) return;
     const { at, on19th } = await spotNear(me);
+    // one that's too close (made before they were set further out, or you've walked up to it): moved out instead
+    if (nearest && nearest.d < NEAR_MIN - 2) return void (await updatePost(nearest.id, { lng: at[0], lat: at[1] }));
     // the 19th Ave demo is always the sunset street; anywhere else, any of the sample moments
     const photo = on19th ? PHOTO : Math.floor(Math.random() * SEED_PHOTOS.length);
     const captions = SEED_SCENES[photo].captions;

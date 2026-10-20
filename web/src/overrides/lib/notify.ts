@@ -62,7 +62,7 @@ export async function updateNearbyRepeat() {
 }
 
 export async function setNearbyRepeat(on: boolean) {
-  // a moment within 20 m of you for the notification to point to
+  // a moment about 50 m from you for the notification to point to
   if (on) import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
   try {
     localStorage.setItem(ON_KEY, on ? '1' : '0');
