@@ -34,12 +34,19 @@ if (window.self !== window.top) {
 // stays put and only the text sheet rides up on the keyboard (see the web TextComposer).
 if (window.self === window.top && window.visualViewport) {
   const vv = window.visualViewport;
+  // only while typing: Safari also reports small shifts at other times (its address bar collapsing), which must
+  // not move the app
+  const typing = () => {
+    const el = document.activeElement;
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+  };
   const follow = () => {
     const root = document.getElementById('root');
-    if (root) root.style.transform = vv.offsetTop > 0 ? `translateY(${vv.offsetTop}px)` : '';
+    if (root) root.style.transform = typing() && vv.offsetTop > 0 ? `translateY(${vv.offsetTop}px)` : '';
   };
   vv.addEventListener('scroll', follow);
   vv.addEventListener('resize', follow);
+  document.addEventListener('focusout', () => setTimeout(follow, 50));
 }
 
 LoadSkiaWeb({ locateFile: (file) => `/${file}` }).then(() => {
