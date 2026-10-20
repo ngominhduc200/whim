@@ -132,7 +132,8 @@ export function PostedCelebration({ post, onReveal, onDone, leaving = false }: P
   // the doodles grow around the pin as far as they can both above and below it
   const roomY = Math.min(cy - margin, H - margin - cy);
   const layer = useMemo(() => doodleLayer(post.strokes, W, roomY), [post.strokes, W, roomY]);
-  const noteTop = cy + Math.max(layer.reach, PIN_HEIGHT / 2) + NOTE_GAP;
+  // always the same spot, whatever the doodles: just below the lowest the doodles can ever reach
+  const noteTop = cy + roomY + NOTE_GAP;
   const layerTransform = [
     { translateX: cx },
     { translateY: cy },
