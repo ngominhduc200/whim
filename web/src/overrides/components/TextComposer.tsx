@@ -20,8 +20,10 @@ function useKeyboardHeight() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (IN_FRAME || !vv) return;
-    // (the page's own shift up is undone in index.js, so the keyboard covers innerHeight − the visible height)
-    const update = () => setHeight(Math.max(0, window.innerHeight - vv.height));
+    // The keyboard covers everything below the visible area. The full screen height is the page's own
+    // (Safari's innerHeight is only the part above the keyboard); the app isn't shifted by the keyboard (index.js
+    // undoes Safari's scroll while typing), so the sheet's bottom goes at the visible height.
+    const update = () => setHeight(Math.max(0, document.documentElement.clientHeight - vv.height));
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
