@@ -2,7 +2,8 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { Keyframe, ZoomOut } from 'react-native-reanimated';
+import Animated, { Keyframe, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import { Text } from '@/components/Text';
 import { press } from '@/lib/press';
@@ -37,7 +38,11 @@ export const USER_MARKER_ANCHOR = { x: 0.5, y: 1 };
 
 /** Your location: the doodled cloud. Tap it and a "You" speech bubble pops up above it for a few seconds. */
 export function UserMarker() {
-  const [open, setOpen] = useState(false);
+  // the bubble shrinks and fades in place when it closes (a layout "exit" animation would leave its copy behind
+  // where it opened if the map moved meanwhile), then it's removed
+  const [shown, setShown] = useState(false);
+  const shownRef = useRef(false);
+  const closing = useSharedValue(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -46,19 +51,25 @@ export function UserMarker() {
     [],
   );
 
+  const hide = () => {
+    if (timer.current) clearTimeout(timer.current);
+    shownRef.current = false;
+    closing.set(withTiming(1, { duration: 150 }, (done) => done && scheduleOnRN(setShown, false)));
+  };
   const toggle = () => {
     Haptics.selectionAsync();
-    if (timer.current) clearTimeout(timer.current);
-    setOpen((was) => {
-      if (!was) timer.current = setTimeout(() => setOpen(false), SHOW_MS);
-      return !was;
-    });
+    if (shownRef.current) return hide();
+    shownRef.current = true;
+    closing.set(0);
+    setShown(true);
+    timer.current = setTimeout(hide, SHOW_MS);
   };
+  const closeStyle = useAnimatedStyle(() => ({ opacity: 1 - closing.get(), transform: [{ scale: 1 - 0.4 * closing.get() }] }));
 
   return (
     <View style={styles.box} pointerEvents="box-none">
-      {open && (
-        <Animated.View entering={POP_IN} exiting={ZoomOut.duration(150)} style={styles.bubble} pointerEvents="none">
+      {shown && (
+        <Animated.View entering={POP_IN} style={[styles.bubble, closeStyle]} pointerEvents="none">
           <Image source={BUBBLE} style={styles.bubbleImage} />
           <Text style={styles.you}>You</Text>
         </Animated.View>
