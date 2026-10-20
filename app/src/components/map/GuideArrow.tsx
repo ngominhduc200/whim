@@ -8,6 +8,7 @@ import { C } from '@/data/doodleKit';
 
 const DRAW_MS = 2000;
 const FADE_MS = 1000;
+const LEAVE_MS = 400;
 const WIDTH = 4;
 // the wiggle: a hand-drawn wave along the arrow, calming down just before the head so the point reads clearly
 const AMPLITUDE = 5;
@@ -22,7 +23,8 @@ type Point = { x: number; y: number };
  * A wiggly hand-drawn arrow (the brush's blue) that draws itself from `from` to `to` on screen in 2s, then fades
  * out in 1s. Used to point from you to a moment nearby.
  */
-export function GuideArrow({ from, to, onDone }: { from: Point; to: Point; onDone: () => void }) {
+/** `leaving`: you moved the map; it fades out now, wherever it's up to. */
+export function GuideArrow({ from, to, onDone, leaving = false }: { from: Point; to: Point; onDone: () => void; leaving?: boolean }) {
   const path = useMemo(() => arrowPath(from, to), [from, to]);
   const progress = useSharedValue(0);
   const opacity = useSharedValue(1);
@@ -37,6 +39,10 @@ export function GuideArrow({ from, to, onDone }: { from: Point; to: Point; onDon
       ),
     );
   }, [progress, opacity, onDone]);
+  useEffect(() => {
+    if (!leaving) return;
+    opacity.set(withTiming(0, { duration: LEAVE_MS }, (done) => done && scheduleOnRN(onDone)));
+  }, [leaving, opacity, onDone]);
   const style = useAnimatedStyle(() => ({ opacity: opacity.get() }));
   return (
     <Animated.View style={[StyleSheet.absoluteFill, style]} pointerEvents="none">

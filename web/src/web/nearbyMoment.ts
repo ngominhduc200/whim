@@ -1,6 +1,7 @@
-// The demo's "Moment nearby", for the notification to point you to: a moment by someone else, made once per
-// browser as soon as whim knows where you are. Near the street the demo was made on, it's the same sunset-street
-// moment on 19th Ave as on the phone; for everyone else, a random sample moment on a street within 20 m of them.
+// The demo's "Moment nearby", for the notification to point you to: a moment by someone else on a street within
+// 20 m of you, made whenever there isn't one that close (once whim knows where you are, and whenever notifications
+// are switched on). On 19th Ave (the demo's street) it's the sunset-street moment, as on the phone; anywhere else,
+// a random sample moment.
 import * as Location from 'expo-location';
 import { Asset } from 'expo-asset';
 
@@ -10,7 +11,7 @@ import { SEED_SCENES } from '@/data/seedScenes';
 import { distanceM, type LngLat } from '@/lib/location';
 import { loadPosts, savePost } from '@/lib/posts';
 
-const DONE = 'demo:nearby-moment';
+const NEAR = 20;
 const PHOTO = 19; // p20: the street at sunset with the little convertible
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? '';
 const ON_19TH = /\b19(th)?\b.*\bav/i;
@@ -39,16 +40,16 @@ async function roadSpots(me: LngLat, radius: number, search: number) {
 }
 
 /**
- * Where the moment goes: on 19th Ave about 50 m away if there is one (the street the demo was made on), otherwise
- * a random spot on a street near you, 8–20 m away (a real "nearby" moment is within 20 m; 8 keeps it clear of
- * your location cloud). With no street that close, a random spot 8–20 m away.
+ * Where the moment goes: a spot on a street 8–20 m from you (a "nearby" moment is within 20 m; 8 keeps it clear of
+ * your location cloud), on 19th Ave if that's one of them (the street the demo was made on). With no street that
+ * close, a random spot 8–20 m away.
  */
 async function spotNear(me: LngLat): Promise<{ at: LngLat; on19th: boolean }> {
-  const far = (await roadSpots(me, 50, 15)).filter((h) => ON_19TH.test(h.name) && h.fromMe >= 20 && h.fromMe <= 50);
-  if (far.length) return { at: far.reduce((a, b) => (Math.abs(a.fromMe - 50) <= Math.abs(b.fromMe - 50) ? a : b)).at, on19th: true };
-  const close = (await roadSpots(me, 14, 8)).filter((h) => h.fromMe >= 8 && h.fromMe <= 20);
+  const close = (await roadSpots(me, 14, 8)).filter((h) => h.fromMe >= 8 && h.fromMe <= NEAR);
+  const on19th = close.filter((h) => ON_19TH.test(h.name));
+  if (on19th.length) return { at: on19th[Math.floor(Math.random() * on19th.length)].at, on19th: true };
   if (close.length) return { at: close[Math.floor(Math.random() * close.length)].at, on19th: false };
-  const d = 8 + Math.random() * 12;
+  const d = 8 + Math.random() * (NEAR - 8);
   const a = Math.random() * Math.PI * 2;
   const mPerDegLng = 111_320 * Math.cos((me[1] * Math.PI) / 180);
   return { at: [me[0] + (Math.sin(a) * d) / mPerDegLng, me[1] + (Math.cos(a) * d) / 111_320], on19th: false };
@@ -57,11 +58,12 @@ async function spotNear(me: LngLat): Promise<{ at: LngLat; on19th: boolean }> {
 let running = false;
 export async function ensureNearbyMoment() {
   try {
-    if (running || localStorage.getItem(DONE)) return;
+    if (running) return;
     running = true;
     const pos = await Location.getCurrentPositionAsync();
     const me: LngLat = [pos.coords.longitude, pos.coords.latitude];
-    if ((await loadPosts()).some((p) => p.byOthers)) return void localStorage.setItem(DONE, '1');
+    // there's already a moment within 20 m of where you are now
+    if ((await loadPosts()).some((p) => p.byOthers && distanceM(me, [p.lng, p.lat]) <= NEAR + 2)) return;
     const { at, on19th } = await spotNear(me);
     // the 19th Ave demo is always the sunset street; anywhere else, any of the sample moments
     const photo = on19th ? PHOTO : Math.floor(Math.random() * SEED_PHOTOS.length);
@@ -76,7 +78,6 @@ export async function ensureNearbyMoment() {
       lat: at[1],
       byOthers: true,
     });
-    localStorage.setItem(DONE, '1');
   } catch {
     // no location yet: tried again next time whim opens
   } finally {

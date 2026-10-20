@@ -17,9 +17,10 @@ const HEAD_ANGLE = (38 * Math.PI) / 180;
 
 type Point = { x: number; y: number };
 
-export function GuideArrow({ from, to, onDone }: { from: Point; to: Point; onDone: () => void }) {
+export function GuideArrow({ from, to, onDone, leaving = false }: { from: Point; to: Point; onDone: () => void; leaving?: boolean }) {
   const d = useMemo(() => arrowPath(from, to), [from, to]);
   const pathRef = useRef<SVGPathElement>(null);
+  const fadeRef = useRef<Animation | null>(null);
   useEffect(() => {
     const path = pathRef.current;
     if (!path) return;
@@ -27,11 +28,21 @@ export function GuideArrow({ from, to, onDone }: { from: Point; to: Point; onDon
     const draw = path.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], { duration: DRAW_MS, easing: 'ease-in-out', fill: 'forwards' });
     const fade = path.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FADE_MS, delay: DRAW_MS, fill: 'forwards' });
     fade.onfinish = onDone;
+    fadeRef.current = fade;
     return () => {
       draw.cancel();
       fade.cancel();
     };
   }, [d, onDone]);
+  // you moved the map: fade out now, wherever it's up to (the line keeps drawing as it fades)
+  useEffect(() => {
+    const path = pathRef.current;
+    if (!leaving || !path) return;
+    fadeRef.current?.cancel();
+    const out = path.animate([{ opacity: getComputedStyle(path).opacity }, { opacity: 0 }], { duration: 400, fill: 'forwards' });
+    out.onfinish = onDone;
+    return () => out.cancel();
+  }, [leaving, onDone]);
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>

@@ -83,17 +83,16 @@ const askBrowser = (timeout: number) =>
     navigator.geolocation.getCurrentPosition((p) => resolve(remember(p)), reject, { maximumAge: Infinity, timeout }),
   );
 
-const currentPosition = async (maximumAge: number): Promise<Location.LocationObject> => {
-  // the background watch (or an earlier fix) usually already knows where you are
-  if (latest && Date.now() - latest.timestamp < maximumAge) return latest;
+const currentPosition = async (_maximumAge: number): Promise<Location.LocationObject> => {
+  // whim keeps tracking you in the background, so the latest position is used right away (it's kept current);
+  // the browser is only asked, briefly, when there's none yet
+  if (latest) return latest;
   keepTracking();
   try {
-    return await askBrowser(6_000);
+    return await askBrowser(5_000);
   } catch (e) {
-    if ((e as GeolocationPositionError).code === 1) throw e; // permission denied: no point retrying
-    // the last place you were seen, however old, beats waiting
     if (latest) return latest;
-    return askBrowser(8_000);
+    throw e;
   }
 };
 

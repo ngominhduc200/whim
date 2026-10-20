@@ -139,6 +139,10 @@ export function MapScreen() {
   // Your location is drawn as a pinned view (not Mapbox's puck, which turns with the map), so the doodled
   // cloud always stays upright on screen. Its image has the cloud's feet at the center.
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const userLocationRef = useRef<[number, number] | null>(null);
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+  }, [userLocation]);
   useEffect(() => {
     if (!showPuck) return;
     let subscription: Location.LocationSubscription | null = null;
@@ -201,6 +205,8 @@ export function MapScreen() {
   // Tapping the "Moment nearby" notification: the map turns so the nearest moment that isn't yours is straight up
   // the screen from you (you in the lower half, it in the upper half), then a wiggly arrow draws from you to it.
   const [guide, setGuide] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
+  // moving the map while the arrow plays fades it out right away
+  const [guideLeaving, setGuideLeaving] = useState(false);
   const guidingRef = useRef(false);
   const [guideAsked, setGuideAsked] = useState(0);
   useEffect(() => onNotificationTap(() => setGuideAsked((n) => n + 1)), []);
@@ -349,6 +355,10 @@ export function MapScreen() {
       setCanTilt(state.properties.zoom >= TILT_ZOOM);
       setInSpace(state.properties.zoom < SPACE_ZOOM);
       if (state.gestures.isGestureActive && focusModeRef.current !== 'free') setMode('free');
+      if (state.gestures.isGestureActive && guidingRef.current) {
+        guidingRef.current = false;
+        setGuideLeaving(true);
+      }
       if (state.gestures.isGestureActive && celebratingRef.current) {
         celebratingRef.current = false;
         setCelebrationLeaving(true);
@@ -387,6 +397,13 @@ export function MapScreen() {
     if (!guideAsked || !mapReady) return;
     let cancelled = false;
     (async () => {
+      // the notification opens whim onto the map: whatever was on top (a post, the camera, settings) closes first
+      if (router.canDismiss()) {
+        router.dismissAll();
+        await new Promise((r) => setTimeout(r, 450));
+        if (cancelled) return;
+      }
+      setGuideLeaving(false);
       setShowPuck(true);
       const me = userLocation ?? (await getCurrentLngLat());
       const others = allPostsRef.current.filter((p) => !isOwnPost(p));
@@ -441,7 +458,8 @@ export function MapScreen() {
       setMode('located');
       return;
     }
-    const here = await getCurrentLngLat();
+    // where the map last saw you (it keeps tracking you), so it responds at once; otherwise, find you
+    const here = userLocationRef.current ?? (await getCurrentLngLat());
     if (!here) return;
     setShowPuck(true);
     const zoom = (await mapRef.current?.getZoom()) ?? 0;
@@ -569,7 +587,7 @@ export function MapScreen() {
         </Animated.View>
       )}
 
-      {guide && <GuideArrow from={guide.from} to={guide.to} onDone={endGuide} />}
+      {guide && <GuideArrow from={guide.from} to={guide.to} onDone={endGuide} leaving={guideLeaving} />}
 
       {celebrating && (
         <PostedCelebration

@@ -42,12 +42,14 @@ export function BottomPanel({ visible, height, onSwipeDown, accessory, children 
       else offset.set(withSpring(0, SPRING));
     });
 
-  const animated = useAnimatedStyle(() => ({ transform: [{ translateY: offset.get() }] }));
+  // fully hidden once it's out of view (a browser can scroll a hidden panel back into sight when the keyboard opens)
+  const animated = useAnimatedStyle(() => ({
+    transform: [{ translateY: offset.get() }],
+    opacity: offset.get() >= full + ACCESSORY_SPACE - 1 ? 0 : 1,
+  }));
 
   return (
-    <Animated.View
-      pointerEvents={visible ? 'box-none' : 'none'}
-      style={[styles.wrap, { height: full + ACCESSORY_SPACE }, animated]}>
+    <Animated.View pointerEvents={visible ? 'box-none' : 'none'} style={[styles.wrap, { height: full + ACCESSORY_SPACE }, animated]}>
       <View pointerEvents="box-none" style={styles.accessory}>
         {accessory}
       </View>
