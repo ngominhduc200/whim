@@ -42,9 +42,14 @@ const CLOSE_DISTANCE = 40;
 const CLOSE_VELOCITY = 500;
 
 // Positions from design/6-overlay.png: photo ~225pt from the top, text ~40pt under it, aligned to its left edge.
-const PHOTO_TOP = 225;
 const PHOTO_HEIGHT = (PHOTO_WIDTH * 4) / 3;
 const TEXT_GAP = 52;
+// the title and the place under it have fixed line heights (×1.15, Gaegu's on-screen scale), so the header's
+// height is known up front and the photo sits the same TEXT_GAP below it as the caption sits below the photo
+const TITLE_LINE = 30;
+const SUBTITLE_LINE = 19;
+const HEADER_GAP = 2;
+const HEADER_HEIGHT = (TITLE_LINE + SUBTITLE_LINE) * 1.15 + HEADER_GAP;
 // the X at the top left; under it, the centered title and where the post was made
 const BACK_TOP = 8; // where the title is measured from, below the safe area
 const TITLE_GAP = 14; // between the X and the title
@@ -65,6 +70,8 @@ export function PostOverlayScreen() {
   }, [post]);
 
   const left = Math.round((screenW - PHOTO_WIDTH) / 2);
+  const headerTop = insets.top + BACK_TOP + TAP + TITLE_GAP;
+  const PHOTO_TOP = headerTop + HEADER_HEIGHT + TEXT_GAP;
   const photoCenter = { x: left + PHOTO_WIDTH / 2, y: PHOTO_TOP + PHOTO_HEIGHT / 2 };
   // without a pin position (shouldn't happen), the photo grows from just below its place instead
   const pin = x != null && y != null ? { x: Number(x), y: Number(y) } : { x: photoCenter.x, y: photoCenter.y + 40 };
@@ -163,7 +170,7 @@ export function PostOverlayScreen() {
         </Animated.View>
         <StatusBar style="dark" />
         <Animated.View style={[StyleSheet.absoluteFill, textStyle]} pointerEvents="box-none">
-          <View style={[styles.header, { top: insets.top + BACK_TOP + TAP + TITLE_GAP }]}>
+          <View style={[styles.header, { top: headerTop }]}>
             <Text style={styles.title}>{isOwnPost(post) ? 'Your moment' : "Someone's moment"}</Text>
             <Text style={styles.subtitle}>{place ?? ' '}</Text>
           </View>
@@ -201,9 +208,9 @@ const styles = StyleSheet.create({
   missing: { alignItems: 'center', justifyContent: 'center' },
   photo: { position: 'absolute' },
   text: { fontSize: 18, lineHeight: 22, color: INK },
-  header: { position: 'absolute', left: EDGE, right: EDGE, alignItems: 'center', gap: 2 },
-  title: { fontSize: 26, color: INK, textAlign: 'center' },
-  subtitle: { fontSize: 16, color: INK_LIGHT, textAlign: 'center' },
+  header: { position: 'absolute', left: EDGE, right: EDGE, alignItems: 'center', gap: HEADER_GAP },
+  title: { fontSize: 26, lineHeight: TITLE_LINE, color: INK, textAlign: 'center' },
+  subtitle: { fontSize: 16, lineHeight: SUBTITLE_LINE, color: INK_LIGHT, textAlign: 'center' },
   // just the X, in a full tap target
   close: { position: 'absolute', left: EDGE, width: TAP, height: TAP, justifyContent: 'center' },
   pressed: { opacity: 0.6 },
