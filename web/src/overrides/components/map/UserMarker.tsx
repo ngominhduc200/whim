@@ -2,7 +2,7 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { Keyframe, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withSequence, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { Text } from '@/components/Text';
@@ -23,12 +23,13 @@ const GAP = 2;
 const SHOW_MS = 3000;
 
 // pops in with exactly two very subtle bounces: just past full size, just under it, then settles
-const POP_IN = new Keyframe({
-  0: { transform: [{ scale: 0 }] },
-  55: { transform: [{ scale: 1.04 }] },
-  80: { transform: [{ scale: 0.985 }] },
-  100: { transform: [{ scale: 1 }] },
-}).duration(380);
+// pops in with exactly two very subtle bounces: just past full size, just under it, then settles (380ms)
+const popIn = () =>
+  withSequence(
+    withTiming(1.04, { duration: 209, easing: Easing.out(Easing.quad) }),
+    withTiming(0.985, { duration: 95 }),
+    withTiming(1, { duration: 76 }),
+  );
 
 // The marker's box is just the cloud drawing (41pt square, its feet on the bottom edge: anchor it at x 0.5, y 1).
 // Everything else (the bubble above) is drawn outside the box. The map treats the whole box as the marker, so a
@@ -43,6 +44,8 @@ export function UserMarker() {
   const [shown, setShown] = useState(false);
   const shownRef = useRef(false);
   const closing = useSharedValue(0);
+  // its size while popping in (all its animation runs on the bubble itself, so it always stays on the cloud)
+  const pop = useSharedValue(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
@@ -61,15 +64,20 @@ export function UserMarker() {
     if (shownRef.current) return hide();
     shownRef.current = true;
     closing.set(0);
+    pop.set(0);
+    pop.set(popIn());
     setShown(true);
     timer.current = setTimeout(hide, SHOW_MS);
   };
-  const closeStyle = useAnimatedStyle(() => ({ opacity: 1 - closing.get(), transform: [{ scale: 1 - 0.4 * closing.get() }] }));
+  const bubbleStyle = useAnimatedStyle(() => ({
+    opacity: 1 - closing.get(),
+    transform: [{ scale: pop.get() * (1 - 0.4 * closing.get()) }],
+  }));
 
   return (
     <View style={styles.box} pointerEvents="box-none">
       {shown && (
-        <Animated.View entering={POP_IN} style={[styles.bubble, closeStyle]} pointerEvents="none">
+        <Animated.View style={[styles.bubble, bubbleStyle]} pointerEvents="none">
           <Image source={BUBBLE} style={styles.bubbleImage} />
           <Text style={styles.you}>You</Text>
         </Animated.View>
