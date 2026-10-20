@@ -20,7 +20,8 @@ function useKeyboardHeight() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (IN_FRAME || !vv) return;
-    const update = () => setHeight(Math.max(0, window.innerHeight - vv.height - vv.offsetTop));
+    // (the page's own shift up is undone in index.js, so the keyboard covers innerHeight − the visible height)
+    const update = () => setHeight(Math.max(0, window.innerHeight - vv.height));
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
