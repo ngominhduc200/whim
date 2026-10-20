@@ -53,11 +53,11 @@ const GUIDE_TURN_MS = 1000;
 const GUIDE_FOLLOW_MS = 700;
 // the arrow never gets shorter than this (when you're right at the pin)
 const GUIDE_MIN_ARROW = 24;
-// where you and the moment end up, as fractions of the screen's height (you just above the capture button)
-const GUIDE_ME_AT = 0.78;
+// where you and the moment end up, as fractions of the screen's height (you well clear of the capture button)
+const GUIDE_ME_AT = 0.7;
 const GUIDE_IT_AT = 0.2;
-// no closer than 18 taps of + from the start (1.6), where streets and doodles still show, so the map is seen moving
-const GUIDE_MAX_ZOOM = 19.6;
+// no closer than 19 taps of + from the start (1.6), where streets and doodles still show, so the map is seen moving
+const GUIDE_MAX_ZOOM = 20.6;
 // Mapbox's camera: its vertical field of view (the same in every Mapbox map)
 const MAPBOX_FOV = 0.6435011087932844;
 
