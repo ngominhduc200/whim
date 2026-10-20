@@ -237,12 +237,26 @@ export function MapScreen() {
     guideLockRef.current = null;
     setGuideLeaving(true);
   }, []);
-  // the lock: every frame your cloud moves, the map moves and turns with it (same zoom and tilt), so your cloud
-  // stays on its spot with the pin straight above it; as you get closer the pin comes down toward you, and the
-  // arrow shortens
+  const [focusMode, setFocusMode] = useState<FocusMode>('free');
+  const focusModeRef = useRef<FocusMode>('free');
+  // while a post is open, the map stays put (the photo lands back on its pin)
+  const viewingPostRef = useRef(false);
+  // the map's own moves (Focus, + / −, the auto-tilt) play out before following takes over again
+  const followHeldUntil = useRef(0);
+  const holdFollow = useCallback((ms: number) => {
+    followHeldUntil.current = Date.now() + ms + 50;
+  }, []);
+  // Every frame your cloud moves, the map moves with it.
+  //  - The notification guide's lock: the map moves and turns (same zoom and tilt), so your cloud stays on its spot
+  //    with the pin straight above it; as you get closer the pin comes down toward you, and the arrow shortens.
+  //  - Focus on (2D or 3D): you stay in the middle of the screen, the map's zoom, tilt and turn as they are.
   const followGuide = useCallback((me: [number, number]) => {
     const lock = guideLockRef.current;
-    if (!lock || !guidingRef.current) return;
+    if (!lock || !guidingRef.current) {
+      if (focusModeRef.current === 'free' || viewingPostRef.current || Date.now() < followHeldUntil.current) return;
+      cameraRef.current?.setCamera({ centerCoordinate: me, animationMode: 'none', animationDuration: 0 });
+      return;
+    }
     lock.me = me;
     // right by the pin its direction swings about with every step, so the map stops turning there
     const heading = distanceM(me, lock.there) > STEADY_HEADING_M ? bearingDeg(me, lock.there) : lock.heading;
@@ -292,8 +306,6 @@ export function MapScreen() {
     // a newer position takes over from wherever the cloud is now
     return () => cancelAnimationFrame(frame);
   }, [userLocation, followGuide]);
-  const [focusMode, setFocusMode] = useState<FocusMode>('free');
-  const focusModeRef = useRef<FocusMode>('free');
   const pitchRef = useRef(0);
   const [inSpace, setInSpace] = useState(START.zoomLevel < SPACE_ZOOM);
 
@@ -408,6 +420,9 @@ export function MapScreen() {
   // compass): only the map itself shows through the overlay's paper. It all comes back when the map is in
   // front again.
   const [viewingPost, setViewingPost] = useState(false);
+  useEffect(() => {
+    viewingPostRef.current = viewingPost;
+  }, [viewingPost]);
   useFocusEffect(
     useCallback(() => {
       setViewingPost(false);
@@ -520,10 +535,11 @@ export function MapScreen() {
       if (celebratingRef.current || guidingRef.current) return;
       const want = state.properties.zoom >= TILT_ZOOM ? TILT_PITCH : 0;
       if (Math.abs(state.properties.pitch - want) > 5) {
+        holdFollow(500);
         cameraRef.current?.setCamera({ pitch: want, animationMode: 'easeTo', animationDuration: 500 });
       }
     },
-    [updateItems],
+    [updateItems, holdFollow],
   );
 
   // waits for the map and your location, then lines them up and draws the arrow (see `guide` above)
@@ -580,39 +596,47 @@ export function MapScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     stopFollowing();
     const zoom = await mapRef.current?.getZoom();
-    if (zoom != null) cameraRef.current?.zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta)), 300);
-  }, [stopFollowing]);
+    if (zoom == null) return;
+    holdFollow(300);
+    cameraRef.current?.zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta)), 300);
+  }, [stopFollowing, holdFollow]);
 
   // Focus: tap 1 centers on you (flat), tap 2 zooms in close (zoom 17, so it tilts to 3D), tap 3 goes back.
   const onFocus = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     stopFollowing();
     const mode = focusModeRef.current;
+    // (centered on where your cloud is right now, as following keeps it)
+    const center = shownRef.current ? { centerCoordinate: shownRef.current } : {};
     if (mode === 'located') {
-      cameraRef.current?.setCamera({ zoomLevel: CLOSE_ZOOM, pitch: TILT_PITCH, animationMode: 'easeTo', animationDuration: 900 });
+      holdFollow(900);
+      cameraRef.current?.setCamera({ ...center, zoomLevel: CLOSE_ZOOM, pitch: TILT_PITCH, animationMode: 'easeTo', animationDuration: 900 });
       setMode('tilted');
       return;
     }
     if (mode === 'tilted') {
-      cameraRef.current?.setCamera({ zoomLevel: LOCATE_ZOOM, pitch: 0, animationMode: 'easeTo', animationDuration: 900 });
+      holdFollow(900);
+      cameraRef.current?.setCamera({ ...center, zoomLevel: LOCATE_ZOOM, pitch: 0, animationMode: 'easeTo', animationDuration: 900 });
       setMode('located');
       return;
     }
     // where the map last saw you (it keeps tracking you), so it responds at once; otherwise, find you
-    const here = userLocationRef.current ?? (await getCurrentLngLat());
+    const here = shownRef.current ?? userLocationRef.current ?? (await getCurrentLngLat());
     if (!here) return;
     setShowPuck(true);
     const zoom = (await mapRef.current?.getZoom()) ?? 0;
     const target = Math.max(zoom, LOCATE_ZOOM);
+    const duration = zoom < 8 ? 2500 : 1200;
+    holdFollow(duration);
     cameraRef.current?.setCamera({
       centerCoordinate: here,
       zoomLevel: target,
       pitch: target >= TILT_ZOOM ? TILT_PITCH : 0,
       animationMode: 'flyTo',
-      animationDuration: zoom < 8 ? 2500 : 1200,
+      animationDuration: duration,
     });
     setMode(target >= TILT_ZOOM ? 'tilted' : 'located');
-  }, [setMode, stopFollowing]);
+  }, [setMode, stopFollowing, holdFollow]);
 
   const openProfile = useCallback(() => {
     Haptics.selectionAsync();
