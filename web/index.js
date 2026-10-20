@@ -3,6 +3,16 @@
 import '@expo/metro-runtime';
 import { LoadSkiaWeb } from '@shopify/react-native-skia/lib/module/web';
 
+// For testing: opening whim with ?reset (e.g. localhost:8082/?reset) forgets everything whim saved on this
+// device (allowed permissions, last known spot, posts, settings) and reloads as a first visit.
+if (new URLSearchParams(window.location.search).has('reset')) {
+  try {
+    localStorage.clear();
+    sessionStorage.clear();
+  } catch {}
+  window.location.replace(window.location.pathname);
+}
+
 // The page itself never scrolls (whim lays out its own screens): otherwise a phone browser scrolls it when the
 // keyboard opens, pulling hidden panels into view.
 const lock = document.createElement('style');
