@@ -529,7 +529,8 @@ export function MapScreen() {
             color: PAPER,
             highColor: PAPER,
             spaceColor: '#0d0d0f',
-            horizonBlend: ['interpolate', ['linear'], ['zoom'], 2, 0.06, 6, 0.1],
+            // a thin, soft rim (a wider blend makes the globe look glowing and shiny)
+            horizonBlend: ['interpolate', ['linear'], ['zoom'], 2, 0.015, 6, 0.05],
             starIntensity: ['interpolate', ['linear'], ['zoom'], 2, 0.25, 5, 0],
             range: [0.8, 8],
           }}
