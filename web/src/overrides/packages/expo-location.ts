@@ -30,8 +30,15 @@ export function requestForegroundPermissionsAsync(): Promise<Permission> {
         // the demo's nearby moment, placed once whim knows where you are
         import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
       },
-      (e) => resolve(e.code === e.PERMISSION_DENIED ? (decided = perm(false, false)) : perm(false, true)),
-      { timeout: 20_000, maximumAge: 60_000 },
+      (e) => {
+        if (e.code === e.PERMISSION_DENIED) return resolve((decided = perm(false, false)));
+        // too slow, or "position unknown" for now: location IS allowed, Safari just hasn't found you yet; keep
+        // tracking, and the first position arrives when it does
+        keepTracking();
+        rememberGranted('location');
+        resolve((decided = perm(true, true)));
+      },
+      { timeout: 8_000, maximumAge: Infinity },
     );
   }).finally(() => {
     asking = null;
@@ -58,7 +65,14 @@ const toLocation = (p: GeolocationPosition): Location.LocationObject => ({
 
 // the latest position the browser has given (from the watcher or a one-off), so asking again is instant
 let latest: Location.LocationObject | null = null;
-const remember = (p: GeolocationPosition) => (latest = toLocation(p));
+// whoever is waiting for a first position (from the background tracking or a direct request, whichever comes first)
+const waiting = new Set<(l: Location.LocationObject) => void>();
+const remember = (p: GeolocationPosition) => {
+  latest = toLocation(p);
+  waiting.forEach((w) => w(latest!));
+  waiting.clear();
+  return latest;
+};
 // once location is allowed, whim keeps track of you in the background, so posting and the locate button never
 // have to wait for Safari to find you from scratch
 let tracking = false;
@@ -76,24 +90,26 @@ export async function watchPositionAsync(_options: Location.LocationOptions, cal
 }
 
 // one-off positions through the browser's own geolocation too (expo's web version can hang in Safari)
-// One fix from the browser. On a Mac, Safari finds you from nearby Wi-Fi, which can take a while and sometimes
-// briefly reports "position unknown" before succeeding, so it's given time and a second try.
-const askBrowser = (timeout: number) =>
-  new Promise<Location.LocationObject>((resolve, reject) =>
-    navigator.geolocation.getCurrentPosition((p) => resolve(remember(p)), reject, { maximumAge: Infinity, timeout }),
-  );
-
 const currentPosition = async (_maximumAge: number): Promise<Location.LocationObject> => {
-  // whim keeps tracking you in the background, so the latest position is used right away (it's kept current);
-  // the browser is only asked, briefly, when there's none yet
+  // whim keeps tracking you in the background, so the latest position is used right away (it's kept current)
   if (latest) return latest;
+  // no position yet: Safari on a Mac finds you from nearby Wi-Fi, which can take a while, so wait for the first
+  // one from either the background tracking or a direct request (a "position unknown" hiccup doesn't end it)
   keepTracking();
-  try {
-    return await askBrowser(5_000);
-  } catch (e) {
-    if (latest) return latest;
-    throw e;
-  }
+  return new Promise<Location.LocationObject>((resolve, reject) => {
+    const got = (l: Location.LocationObject) => {
+      clearTimeout(done);
+      resolve(l);
+    };
+    const fail = (e: unknown) => {
+      clearTimeout(done);
+      waiting.delete(got);
+      reject(e);
+    };
+    const done = setTimeout(() => fail(new Error('No location')), 25_000);
+    waiting.add(got);
+    navigator.geolocation.getCurrentPosition(remember, (e) => e.code === 1 && fail(e), { maximumAge: Infinity, timeout: 25_000 });
+  });
 };
 
 // a fix from the last few minutes is good enough (a fresh one can take a while in a browser)
