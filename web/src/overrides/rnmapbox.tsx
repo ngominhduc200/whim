@@ -110,12 +110,22 @@ function WebCompass({ position, fadeWhenNorth }: CompassProps) {
 }
 const COMPASS = require('@/assets/landmarks/compass.png');
 
+// The tilt limit, which the web map view doesn't pass on to the map.
+function MaxPitch({ value }: { value: number }) {
+  const { map } = useContext(MapContext) as { map?: any };
+  useEffect(() => {
+    map?.setMaxPitch(value);
+  }, [map, value]);
+  return null;
+}
+
 const RealMapView = MapboxGL.MapView as unknown as React.ComponentType<Record<string, unknown>>;
 export const MapView = forwardRef<unknown, ComponentProps<typeof MapboxGL.MapView>>(function MapView(props, ref) {
-  const { children, compassEnabled, compassPosition, compassFadeWhenNorth } = props as Record<string, any>;
+  const { children, compassEnabled, compassPosition, compassFadeWhenNorth, maxPitch } = props as Record<string, any>;
   return (
     <RealMapView {...props} ref={ref}>
       {children}
+      {maxPitch != null && <MaxPitch value={maxPitch} />}
       {compassEnabled !== false && <WebCompass position={compassPosition} fadeWhenNorth={compassFadeWhenNorth} />}
     </RealMapView>
   );

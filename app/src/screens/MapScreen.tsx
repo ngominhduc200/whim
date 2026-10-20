@@ -557,6 +557,8 @@ export function MapScreen() {
         onPress={ignoreMapTap}
         scaleBarEnabled={false}
         pitchEnabled={canTilt}
+        // you can tilt the map yourself, but no further than the automatic tilt
+        maxPitch={TILT_PITCH}
         compassEnabled={!viewingPost && !celebrating}
         compassImage={compassReady ? 'compass' : undefined}
         onDidFinishLoadingStyle={() => {
