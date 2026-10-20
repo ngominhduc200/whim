@@ -48,10 +48,21 @@ export function TextComposer({ initial, onSave, onCancel }: Props) {
   const [text, setText] = useState(initial);
   const save = () => onSave(text.trim());
   const keyboard = useKeyboardHeight();
+  // On a phone, iOS scrolls the whole page up if the field being focused would end up under the keyboard. So the
+  // sheet starts (invisibly) at the top of the screen, where the keyboard can't cover it, and takes focus there;
+  // once the keyboard is up it moves onto it and appears. Nothing behind it moves.
+  const [placed, setPlaced] = useState(IN_FRAME);
+  useEffect(() => {
+    if (placed) return;
+    if (keyboard > 0) return setPlaced(true);
+    // no on-screen keyboard came up (a computer's narrow window): just show it at the bottom
+    const t = setTimeout(() => setPlaced(true), 700);
+    return () => clearTimeout(t);
+  }, [keyboard, placed]);
 
   return (
     <View style={styles.fill} pointerEvents="box-none">
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, !placed && styles.waiting]}>
         <View style={styles.header}>
           <Pressable
             onPress={onCancel}
@@ -102,13 +113,15 @@ export function TextComposer({ initial, onSave, onCancel }: Props) {
           capitalize={text.length === 0 || /[.!?]\s$/.test(text)}
         />
       ) : (
-        <View style={{ height: keyboard }} />
+        placed && <View style={{ height: keyboard }} />
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // before it's placed on the keyboard: at the top, unseen
+  waiting: { position: 'absolute', top: 0, left: 0, right: 0, opacity: 0 },
   fill: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: SHEET,
