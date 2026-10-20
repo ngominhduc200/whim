@@ -49,10 +49,10 @@ type Ghost = { key: string; item: MapItem; to: { x: number; y: number } };
 const ignoreMapTap = () => {};
 // tapping the nearby notification: how long the map takes to turn, and the arrow's gap from you and the pin
 const GUIDE_TURN_MS = 1000;
-// while locked: how long each follow-move takes (its easing is what makes the map glide), and how much of each
-// new position is taken (1: all of it, so your cloud stays exactly on its spot)
+// while locked: how long each follow-move takes (its easing is what makes the map glide)
 const GUIDE_FOLLOW_MS = 700;
-const GUIDE_SMOOTH = 1;
+// the arrow never gets shorter than this (when you're right at the pin)
+const GUIDE_MIN_ARROW = 24;
 // where you and the moment end up, as fractions of the screen's height (you just above the capture button)
 const GUIDE_ME_AT = 0.78;
 const GUIDE_IT_AT = 0.2;
@@ -67,7 +67,22 @@ const MAPBOX_FOV = 0.6435011087932844;
  * (H/2) / tan(fov/2)), so how far the center sits along the way, and the zoom, can be solved for exactly. 3D (the
  * map's usual tilt) when that lands close enough for it; flat otherwise.
  */
-function guideCamera(me: [number, number], there: [number, number], H: number, fixedPitch?: number) {
+/**
+ * The map center that puts `me` at GUIDE_ME_AT of the screen's height, at this zoom, tilt and heading (the
+ * direction the map faces): the point that far ahead of you on the ground, along the heading.
+ */
+function anchoredCenter(me: [number, number], heading: number, zoom: number, pitchDeg: number, H: number): [number, number] {
+  const below = H * (GUIDE_ME_AT - 0.5);
+  const D = H / 2 / Math.tan(MAPBOX_FOV / 2);
+  const p = (pitchDeg * Math.PI) / 180;
+  const backPts = (below * D) / (D * Math.cos(p) + below * Math.sin(p));
+  const ptsPerMeter = (512 * 2 ** zoom) / (40_075_016.686 * Math.cos((me[1] * Math.PI) / 180));
+  const m = backPts / ptsPerMeter;
+  const h = (heading * Math.PI) / 180;
+  return [me[0] + (m * Math.sin(h)) / (111_320 * Math.cos((me[1] * Math.PI) / 180)), me[1] + (m * Math.cos(h)) / 111_320];
+}
+
+function guideCamera(me: [number, number], there: [number, number], H: number) {
   const below = H * (GUIDE_ME_AT - 0.5); // you, below the middle
   const above = H * (0.5 - GUIDE_IT_AT); // it, above the middle
   const D = H / 2 / Math.tan(MAPBOX_FOV / 2);
@@ -83,9 +98,9 @@ function guideCamera(me: [number, number], there: [number, number], H: number, f
     const t = back / (back + ahead);
     return { zoom, t };
   };
-  let pitch = fixedPitch ?? TILT_PITCH;
+  let pitch = TILT_PITCH;
   let { zoom, t } = solve(pitch);
-  if (fixedPitch == null && zoom < TILT_ZOOM) {
+  if (zoom < TILT_ZOOM) {
     pitch = 0;
     ({ zoom, t } = solve(0));
   }
@@ -218,7 +233,7 @@ export function MapScreen() {
   useEffect(() => onNotificationTap(() => setGuideAsked((n) => n + 1)), []);
   // While the arrow is up, the cloud, the arrow and the pin stay locked on screen: as you move, the map follows
   // you (like navigation in a maps app), turning so the pin stays straight above you, at the same tilt.
-  const guideLockRef = useRef<{ there: [number, number]; pitch: number; me: [number, number] } | null>(null);
+  const guideLockRef = useRef<{ there: [number, number]; pitch: number; zoom: number; me: [number, number] } | null>(null);
   const endGuide = useCallback(() => {
     guidingRef.current = false;
     guideLockRef.current = null;
@@ -370,6 +385,14 @@ export function MapScreen() {
         guideLockRef.current = null;
         setGuideLeaving(true);
       }
+      // while locked, the arrow's tip follows the pin (the arrow shortens as you get closer)
+      const lock = guideLockRef.current;
+      if (lock && guidingRef.current) {
+        mapRef.current?.getPointInView(lock.there).then((b) => {
+          if (!b || !guideLockRef.current) return;
+          setGuide((g) => (g ? { ...g, to: { x: b[0], y: Math.min(b[1] + GUIDE_GAP, g.from.y - GUIDE_MIN_ARROW) } } : g));
+        });
+      }
       if (state.gestures.isGestureActive && celebratingRef.current) {
         celebratingRef.current = false;
         setCelebrationLeaving(true);
@@ -441,7 +464,7 @@ export function MapScreen() {
       if (cancelled || !a || !b) return void (guidingRef.current = false);
       // from just above your cloud to just under the pin's photo (its bottom edge is on the post); from here on the
       // map keeps both on these spots as you move, so the arrow stays put
-      guideLockRef.current = { there, pitch: view.pitch, me };
+      guideLockRef.current = { there, pitch: view.pitch, zoom: view.zoom, me };
       setGuide({ from: { x: a[0], y: a[1] - USER_CLOUD_HEIGHT - GUIDE_GAP }, to: { x: b[0], y: b[1] + GUIDE_GAP } });
     })();
     return () => {
@@ -451,21 +474,18 @@ export function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guideAsked, mapReady]);
 
-  // the lock: each new position of yours moves, turns and zooms the map so you, the arrow and the pin keep their
-  // places on screen (positions are smoothed a little, so the map glides instead of jittering with the GPS)
+  // the lock: each new position of yours moves and turns the map (same zoom and tilt) so your cloud stays on its
+  // spot with the pin straight above it; as you get closer the pin comes down toward you, and the arrow shortens
   useEffect(() => {
     const lock = guideLockRef.current;
     if (!lock || !userLocation || !guidingRef.current) return;
-    const me: [number, number] = [
-      lock.me[0] + (userLocation[0] - lock.me[0]) * GUIDE_SMOOTH,
-      lock.me[1] + (userLocation[1] - lock.me[1]) * GUIDE_SMOOTH,
-    ];
+    const me = userLocation;
     lock.me = me;
-    const view = guideCamera(me, lock.there, screenRef.current.height, lock.pitch);
+    const heading = bearingDeg(me, lock.there);
     cameraRef.current?.setCamera({
-      centerCoordinate: view.center,
-      zoomLevel: view.zoom,
-      heading: bearingDeg(me, lock.there),
+      centerCoordinate: anchoredCenter(me, heading, lock.zoom, lock.pitch, screenRef.current.height),
+      zoomLevel: lock.zoom,
+      heading,
       pitch: lock.pitch,
       animationMode: 'easeTo',
       animationDuration: GUIDE_FOLLOW_MS,

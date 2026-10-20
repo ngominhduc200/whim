@@ -33,7 +33,9 @@ export function GuideArrow({ from, to, onDone, leaving = false }: { from: Point;
       draw.cancel();
       fade.cancel();
     };
-  }, [d, onDone]);
+    // started once; the line can change shape while it draws (its tip follows the pin)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onDone]);
   // you moved the map: fade out now, wherever it's up to (the line keeps drawing as it fades)
   useEffect(() => {
     const path = pathRef.current;
