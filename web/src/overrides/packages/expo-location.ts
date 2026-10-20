@@ -31,6 +31,7 @@ export function requestForegroundPermissionsAsync(): Promise<Permission> {
         import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
       },
       (e) => {
+        noteError(e);
         if (e.code === e.PERMISSION_DENIED) return resolve((decided = perm(false, false)));
         // too slow, or "position unknown" for now: location IS allowed, Safari just hasn't found you yet; keep
         // tracking, and the first position arrives when it does
@@ -65,6 +66,12 @@ const toLocation = (p: GeolocationPosition): Location.LocationObject => ({
 
 // the latest position the browser has given (from the watcher or a one-off), so asking again is instant
 let latest: Location.LocationObject | null = null;
+/** What Safari said the last time it couldn't give a position (shown in the "Location Unavailable" message). */
+export let lastLocationError = '';
+const noteError = (e: GeolocationPositionError) => {
+  const why = e.code === 1 ? 'location is blocked for this site' : e.code === 2 ? 'the browser couldn\'t work out where you are' : 'the browser took too long to find you';
+  lastLocationError = `${why} (code ${e.code}${e.message ? `: ${e.message}` : ''})`;
+};
 // whoever is waiting for a first position (from the background tracking or a direct request, whichever comes first)
 const waiting = new Set<(l: Location.LocationObject) => void>();
 const remember = (p: GeolocationPosition) => {
@@ -79,7 +86,7 @@ let tracking = false;
 function keepTracking() {
   if (tracking || !navigator.geolocation) return;
   tracking = true;
-  navigator.geolocation.watchPosition(remember, () => {}, { enableHighAccuracy: false, maximumAge: 60_000 });
+  navigator.geolocation.watchPosition(remember, noteError, { enableHighAccuracy: false, maximumAge: 60_000 });
 }
 
 export async function watchPositionAsync(_options: Location.LocationOptions, callback: Location.LocationCallback): Promise<Location.LocationSubscription> {
@@ -108,7 +115,14 @@ const currentPosition = async (_maximumAge: number): Promise<Location.LocationOb
     };
     const done = setTimeout(() => fail(new Error('No location')), 25_000);
     waiting.add(got);
-    navigator.geolocation.getCurrentPosition(remember, (e) => e.code === 1 && fail(e), { maximumAge: Infinity, timeout: 25_000 });
+    navigator.geolocation.getCurrentPosition(
+      remember,
+      (e) => {
+        noteError(e);
+        if (e.code === 1) fail(e);
+      },
+      { maximumAge: Infinity, timeout: 25_000 },
+    );
   });
 };
 

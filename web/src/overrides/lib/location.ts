@@ -25,11 +25,12 @@ export async function getCurrentLngLat(): Promise<LngLat | null> {
   } catch {
     if (!warned) {
       warned = true;
+      const why = (Location as unknown as { lastLocationError?: string }).lastLocationError;
       Alert.alert(
         'Location Unavailable',
-        "whim couldn't get your location from the browser, so it's using " +
+        `whim couldn't get your location${why ? `: ${why}` : ''}. For now it's using ` +
           (last ? 'your last known spot' : 'downtown Vancouver') +
-          '. To use yours, allow location for this site (and turn on Location Services for your browser).',
+          '. Check that Wi-Fi is on and that Location Services is on for Safari (System Settings ▸ Privacy & Security).',
       );
     }
     return last ?? DEMO_SPOT;
