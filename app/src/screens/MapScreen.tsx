@@ -56,7 +56,8 @@ const GUIDE_MIN_ARROW = 24;
 // where you and the moment end up, as fractions of the screen's height (you just above the capture button)
 const GUIDE_ME_AT = 0.78;
 const GUIDE_IT_AT = 0.2;
-const GUIDE_MAX_ZOOM = 22;
+// no closer than 18 taps of + from the start (1.6), where streets and doodles still show, so the map is seen moving
+const GUIDE_MAX_ZOOM = 19.6;
 // Mapbox's camera: its vertical field of view (the same in every Mapbox map)
 const MAPBOX_FOV = 0.6435011087932844;
 
@@ -452,7 +453,8 @@ export function MapScreen() {
       guidingRef.current = true;
       setMode('free');
       cameraRef.current?.setCamera({
-        centerCoordinate: view.center,
+        // your cloud on its spot from the start (with the zoom capped, a close pin then sits lower than its spot)
+        centerCoordinate: anchoredCenter(me, heading, view.zoom, view.pitch, H),
         zoomLevel: view.zoom,
         heading,
         pitch: view.pitch,
