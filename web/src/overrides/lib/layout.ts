@@ -15,8 +15,18 @@ const PHOTO_TOP = 176;
 // the brush panel (176pt) and the undo/redo pill above it (64pt)
 const PANEL = 176 + 64;
 
+// The screen's full height for this width. On a phone the browser's height shrinks while the keyboard is open,
+// which must not resize or move the photo, so the tallest height seen at this width is used (a rotation, which
+// changes the width, starts over).
+let tallest = { width: 0, height: 0 };
+function fullHeight(width: number, height: number) {
+  if (width !== tallest.width || height > tallest.height) tallest = { width, height };
+  return tallest.height;
+}
+
 export function usePhotoFrame() {
-  const { width, height } = useWindowDimensions();
+  const { width, height: current } = useWindowDimensions();
+  const height = fullHeight(width, current);
   const insets = useSafeAreaInsets();
   const top = insets.top + TOP_BUTTON_TOP + TAP + 8; // just below the X
   const bottom = height - insets.bottom - PANEL; // just above the brush panel
