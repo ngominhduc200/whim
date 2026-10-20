@@ -112,6 +112,11 @@ const GUIDE_GAP = 24;
 const GLIDE_MIN_MS = 300;
 const GLIDE_MAX_MS = 1500;
 const GLIDE_JUMP_M = 200;
+// GPS wander while you stand still: a new position closer than its margin of error (at least / at most this many
+// metres) is ignored, unless the phone says you're moving at walking speed (m/s)
+const STILL_MIN_M = 5;
+const STILL_MAX_M = 20;
+const WALKING_MPS = 0.5;
 // closer to the pin than this, the following map keeps facing the way it was
 const STEADY_HEADING_M = 12;
 
@@ -188,10 +193,21 @@ export function MapScreen() {
     if (!showPuck) return;
     let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
-    // every metre or so (GPS-grade), so your cloud has a steady stream of positions to glide along
-    Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 1 }, (pos) =>
-      setUserLocation([pos.coords.longitude, pos.coords.latitude]),
-    ).then((s) => {
+    // every metre or so (GPS-grade), so your cloud has a steady stream of positions to glide along. Standing
+    // still, GPS wanders by several metres; that's not you moving, so a new position only counts if it's further
+    // than its own margin of error (or you're walking, by the phone's own speed reading), or much more precise.
+    let kept: { at: [number, number]; accuracy: number } | null = null;
+    Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 1 }, (pos) => {
+      const at: [number, number] = [pos.coords.longitude, pos.coords.latitude];
+      const accuracy = pos.coords.accuracy ?? STILL_MIN_M;
+      const walking = (pos.coords.speed ?? 0) >= WALKING_MPS;
+      if (kept && !walking && accuracy > kept.accuracy / 2) {
+        const margin = Math.min(STILL_MAX_M, Math.max(STILL_MIN_M, accuracy));
+        if (distanceM(kept.at, at) < margin) return;
+      }
+      kept = { at, accuracy };
+      setUserLocation(at);
+    }).then((s) => {
       if (cancelled) s.remove();
       else subscription = s;
     });
