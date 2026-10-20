@@ -32,6 +32,8 @@ import { isOwnPost, type Post } from '@/lib/posts';
 import { usePosts } from '@/lib/usePosts';
 
 const TOKEN = process.env.EXPO_PUBLIC_MAPBOX_TOKEN ?? '';
+// the dark around the globe
+const SPACE = '#0d0d0f';
 // the compass: a 44×44 tap box with a 16.5pt-wide needle at its center (scripts/build-landmark-icons.mjs)
 const COMPASS_BOX = 44;
 const COMPASS_NEEDLE_WIDTH = 16.5;
@@ -527,10 +529,10 @@ export function MapScreen() {
         <Atmosphere
           style={{
             color: PAPER,
-            highColor: PAPER,
-            spaceColor: '#0d0d0f',
-            // a thin, soft rim (a wider blend makes the globe look glowing and shiny)
-            horizonBlend: ['interpolate', ['linear'], ['zoom'], 2, 0.015, 6, 0.05],
+            highColor: '#6b6058',
+            spaceColor: SPACE,
+            // just a hint of glow, so the globe's edge isn't razor sharp against space
+            horizonBlend: 0.012,
             starIntensity: ['interpolate', ['linear'], ['zoom'], 2, 0.25, 5, 0],
             range: [0.8, 8],
           }}
