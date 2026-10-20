@@ -126,7 +126,9 @@ export function TextComposer({ initial, onSave, onCancel }: Props) {
             capitalize={text.length === 0 || /[.!?]\s$/.test(text)}
           />
         ) : (
-          placed && <View style={{ height: keyboard }} />
+          // the sheet's color carries on behind the keyboard and Safari's floating toolbar above it, so there's no
+          // see-through strip between the sheet and the keyboard
+          placed && <View style={{ height: keyboard, backgroundColor: SHEET }} />
         )}
       </Animated.View>
     </View>
