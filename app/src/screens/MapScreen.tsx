@@ -49,8 +49,6 @@ type Ghost = { key: string; item: MapItem; to: { x: number; y: number } };
 const ignoreMapTap = () => {};
 // tapping the nearby notification: how long the map takes to turn, and the arrow's gap from you and the pin
 const GUIDE_TURN_MS = 1000;
-// while locked: how long each follow-move takes (its easing is what makes the map glide)
-const GUIDE_FOLLOW_MS = 700;
 // the arrow never gets shorter than this (when you're right at the pin)
 const GUIDE_MIN_ARROW = 24;
 // where you and the moment end up, as fractions of the screen's height (you well clear of the capture button)
@@ -110,6 +108,27 @@ function guideCamera(me: [number, number], there: [number, number], H: number) {
   return { center, zoom, pitch };
 }
 const GUIDE_GAP = 24;
+// your cloud's glide from one position to the next: at least / at most this long; a jump this far isn't glided
+const GLIDE_MIN_MS = 300;
+const GLIDE_MAX_MS = 1500;
+const GLIDE_JUMP_M = 200;
+// closer to the pin than this, the following map keeps facing the way it was
+const STEADY_HEADING_M = 12;
+
+/** Your cloud, at wherever its glide has got to (it re-renders on its own, every frame it moves). */
+function GlidingUserMarker({ subscribe }: { subscribe: (fn: (at: [number, number]) => void) => () => void }) {
+  const [at, setAt] = useState<[number, number] | null>(null);
+  useEffect(() => subscribe(setAt), [subscribe]);
+  // the same element every frame, so the cloud itself isn't redrawn, only moved
+  const cloud = useMemo(() => <UserMarker />, []);
+  if (!at) return null;
+  return (
+    // "selected" keeps your location drawn above the post pins
+    <MarkerView coordinate={at} anchor={USER_MARKER_ANCHOR} allowOverlap allowOverlapWithPuck isSelected>
+      {cloud}
+    </MarkerView>
+  );
+}
 const PIN_HEIGHT = (PIN_WIDTH * 4) / 3;
 
 const MAP_IMAGES = {
@@ -169,7 +188,8 @@ export function MapScreen() {
     if (!showPuck) return;
     let subscription: Location.LocationSubscription | null = null;
     let cancelled = false;
-    Location.watchPositionAsync({ accuracy: Location.Accuracy.Balanced, distanceInterval: 5 }, (pos) =>
+    // every metre or so (GPS-grade), so your cloud has a steady stream of positions to glide along
+    Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 1 }, (pos) =>
       setUserLocation([pos.coords.longitude, pos.coords.latitude]),
     ).then((s) => {
       if (cancelled) s.remove();
@@ -180,6 +200,82 @@ export function MapScreen() {
       subscription?.remove();
     };
   }, [showPuck]);
+  // Tapping the "Moment nearby" notification: the map turns so the nearest moment that isn't yours is straight up
+  // the screen from you (you in the lower half, it in the upper half), then a wiggly arrow draws from you to it.
+  const [guide, setGuide] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
+  // moving the map while the arrow plays fades it out right away
+  const [guideLeaving, setGuideLeaving] = useState(false);
+  const guidingRef = useRef(false);
+  const [guideAsked, setGuideAsked] = useState(0);
+  useEffect(() => onNotificationTap(() => setGuideAsked((n) => n + 1)), []);
+  // From then on, the cloud and the pin stay locked on screen: as you move, the map follows you (like navigation
+  // in a maps app), turning so the pin stays straight above you, at the same tilt. That carries on after the arrow
+  // has faded, until you move the map yourself or use the map's buttons.
+  const guideLockRef = useRef<{ there: [number, number]; pitch: number; zoom: number; me: [number, number]; heading: number } | null>(
+    null,
+  );
+  const endGuide = useCallback(() => setGuide(null), []);
+  const stopFollowing = useCallback(() => {
+    if (!guidingRef.current) return;
+    guidingRef.current = false;
+    guideLockRef.current = null;
+    setGuideLeaving(true);
+  }, []);
+  // the lock: every frame your cloud moves, the map moves and turns with it (same zoom and tilt), so your cloud
+  // stays on its spot with the pin straight above it; as you get closer the pin comes down toward you, and the
+  // arrow shortens
+  const followGuide = useCallback((me: [number, number]) => {
+    const lock = guideLockRef.current;
+    if (!lock || !guidingRef.current) return;
+    lock.me = me;
+    // right by the pin its direction swings about with every step, so the map stops turning there
+    const heading = distanceM(me, lock.there) > STEADY_HEADING_M ? bearingDeg(me, lock.there) : lock.heading;
+    lock.heading = heading;
+    cameraRef.current?.setCamera({
+      centerCoordinate: anchoredCenter(me, heading, lock.zoom, lock.pitch, screenRef.current.height),
+      zoomLevel: lock.zoom,
+      heading,
+      pitch: lock.pitch,
+      animationMode: 'none',
+      animationDuration: 0,
+    });
+  }, []);
+  // Where your cloud is drawn: it glides from each position to the next (like a navigation app) instead of
+  // jumping, taking about as long as the last position took to arrive, so it moves at your pace. It's sent straight
+  // to the cloud's marker (not through this screen's state), so the map isn't redrawn every frame.
+  const shownRef = useRef<[number, number] | null>(null);
+  const shownListeners = useRef(new Set<(at: [number, number]) => void>());
+  const subscribeShown = useCallback((fn: (at: [number, number]) => void) => {
+    shownListeners.current.add(fn);
+    if (shownRef.current) fn(shownRef.current);
+    return () => void shownListeners.current.delete(fn);
+  }, []);
+  const lastFixAtRef = useRef(0);
+  useEffect(() => {
+    if (!userLocation) return;
+    const now = Date.now();
+    const gap = now - lastFixAtRef.current;
+    lastFixAtRef.current = now;
+    const show = (at: [number, number]) => {
+      shownRef.current = at;
+      shownListeners.current.forEach((fn) => fn(at));
+      followGuide(at);
+    };
+    const from = shownRef.current;
+    // the first position, or a big jump (a fresh fix far from the last): just be there
+    if (!from || distanceM(from, userLocation) > GLIDE_JUMP_M) return void show(userLocation);
+    const to = userLocation;
+    const duration = Math.min(GLIDE_MAX_MS, Math.max(GLIDE_MIN_MS, gap));
+    let frame = 0;
+    const step = () => {
+      const t = Math.min(1, (Date.now() - now) / duration);
+      show([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    // a newer position takes over from wherever the cloud is now
+    return () => cancelAnimationFrame(frame);
+  }, [userLocation, followGuide]);
   const [focusMode, setFocusMode] = useState<FocusMode>('free');
   const focusModeRef = useRef<FocusMode>('free');
   const pitchRef = useRef(0);
@@ -201,6 +297,7 @@ export function MapScreen() {
   const onPostAdded = useCallback((post: Post) => {
     // someone else's post (a test post added on this phone) just appears; the animation is for posting your own
     if (post.byOthers) return;
+    stopFollowing();
     // Centered on the new post, keeping your view: the same tilt (3D stays 3D) and rotation, and the same zoom
     // unless the post would be grouped into a stack there; then the closest zoom where it's its own pin (a quarter
     // level past that whole level, so rounding can't drop back below it). Never further out than LOCATE_ZOOM.
@@ -221,25 +318,9 @@ export function MapScreen() {
     celebratingRef.current = true;
     setCelebrationLeaving(false);
     setCelebrating(post);
-  }, []);
+  }, [stopFollowing]);
   const revealPin = useCallback(() => setHiddenPin(null), []);
 
-  // Tapping the "Moment nearby" notification: the map turns so the nearest moment that isn't yours is straight up
-  // the screen from you (you in the lower half, it in the upper half), then a wiggly arrow draws from you to it.
-  const [guide, setGuide] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
-  // moving the map while the arrow plays fades it out right away
-  const [guideLeaving, setGuideLeaving] = useState(false);
-  const guidingRef = useRef(false);
-  const [guideAsked, setGuideAsked] = useState(0);
-  useEffect(() => onNotificationTap(() => setGuideAsked((n) => n + 1)), []);
-  // While the arrow is up, the cloud, the arrow and the pin stay locked on screen: as you move, the map follows
-  // you (like navigation in a maps app), turning so the pin stays straight above you, at the same tilt.
-  const guideLockRef = useRef<{ there: [number, number]; pitch: number; zoom: number; me: [number, number] } | null>(null);
-  const endGuide = useCallback(() => {
-    guidingRef.current = false;
-    guideLockRef.current = null;
-    setGuide(null);
-  }, []);
   const endCelebration = useCallback(() => {
     celebratingRef.current = false;
     setCelebrating(null);
@@ -332,6 +413,7 @@ export function MapScreen() {
   const openCluster = useCallback(
     (cluster: Extract<MapItem, { kind: 'cluster' }>) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      stopFollowing();
       const zoom = clusters.splitZoom(cluster, screen);
       if (zoom > CLUSTER_MAX_ZOOM) {
         // posts at the exact same spot never separate; just open the front one
@@ -346,15 +428,16 @@ export function MapScreen() {
         animationDuration: 900,
       });
     },
-    [clusters, showPost, screen],
+    [clusters, showPost, screen, stopFollowing],
   );
 
   const openPost = useCallback(
     (post: Post) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      stopFollowing();
       showPost(post.id, [post.lng, post.lat]);
     },
-    [showPost],
+    [showPost, stopFollowing],
   );
 
   const setMode = useCallback((mode: FocusMode) => {
@@ -440,7 +523,7 @@ export function MapScreen() {
       }
       setGuideLeaving(false);
       setShowPuck(true);
-      const me = userLocation ?? (await getCurrentLngLat());
+      const me = shownRef.current ?? userLocation ?? (await getCurrentLngLat());
       const others = allPostsRef.current.filter((p) => !isOwnPost(p));
       if (!me || !others.length || cancelled) return;
       const target = others.reduce((a, b) => (distanceM(me, [a.lng, a.lat]) <= distanceM(me, [b.lng, b.lat]) ? a : b));
@@ -466,7 +549,7 @@ export function MapScreen() {
       if (cancelled || !a || !b) return void (guidingRef.current = false);
       // from just above your cloud to just under the pin's photo (its bottom edge is on the post); from here on the
       // map keeps both on these spots as you move, so the arrow stays put
-      guideLockRef.current = { there, pitch: view.pitch, zoom: view.zoom, me };
+      guideLockRef.current = { there, pitch: view.pitch, zoom: view.zoom, me, heading };
       setGuide({ from: { x: a[0], y: a[1] - USER_CLOUD_HEIGHT - GUIDE_GAP }, to: { x: b[0], y: b[1] + GUIDE_GAP } });
     })();
     return () => {
@@ -476,33 +559,18 @@ export function MapScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guideAsked, mapReady]);
 
-  // the lock: each new position of yours moves and turns the map (same zoom and tilt) so your cloud stays on its
-  // spot with the pin straight above it; as you get closer the pin comes down toward you, and the arrow shortens
-  useEffect(() => {
-    const lock = guideLockRef.current;
-    if (!lock || !userLocation || !guidingRef.current) return;
-    const me = userLocation;
-    lock.me = me;
-    const heading = bearingDeg(me, lock.there);
-    cameraRef.current?.setCamera({
-      centerCoordinate: anchoredCenter(me, heading, lock.zoom, lock.pitch, screenRef.current.height),
-      zoomLevel: lock.zoom,
-      heading,
-      pitch: lock.pitch,
-      animationMode: 'easeTo',
-      animationDuration: GUIDE_FOLLOW_MS,
-    });
-  }, [userLocation]);
 
   const zoomBy = useCallback(async (delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    stopFollowing();
     const zoom = await mapRef.current?.getZoom();
     if (zoom != null) cameraRef.current?.zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta)), 300);
-  }, []);
+  }, [stopFollowing]);
 
   // Focus: tap 1 centers on you (flat), tap 2 zooms in close (zoom 17, so it tilts to 3D), tap 3 goes back.
   const onFocus = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    stopFollowing();
     const mode = focusModeRef.current;
     if (mode === 'located') {
       cameraRef.current?.setCamera({ zoomLevel: CLOSE_ZOOM, pitch: TILT_PITCH, animationMode: 'easeTo', animationDuration: 900 });
@@ -528,7 +596,7 @@ export function MapScreen() {
       animationDuration: zoom < 8 ? 2500 : 1200,
     });
     setMode(target >= TILT_ZOOM ? 'tilted' : 'located');
-  }, [setMode]);
+  }, [setMode, stopFollowing]);
 
   const openProfile = useCallback(() => {
     Haptics.selectionAsync();
@@ -573,12 +641,7 @@ export function MapScreen() {
         attributionEnabled={false}
       >
         <Camera ref={cameraRef} defaultSettings={START} minZoomLevel={MIN_ZOOM} maxZoomLevel={MAX_ZOOM} />
-        {showPuck && userLocation && !viewingPost && (
-          // "selected" keeps your location drawn above the post pins
-          <MarkerView coordinate={userLocation} anchor={USER_MARKER_ANCHOR} allowOverlap allowOverlapWithPuck isSelected>
-            <UserMarker />
-          </MarkerView>
-        )}
+        {showPuck && userLocation && !viewingPost && <GlidingUserMarker subscribe={subscribeShown} />}
         {/* the basemap flattened to one canvas color (theme 'custom' isn't in the library's types yet) */}
         <StyleImport id="basemap" existing config={STANDARD_CONFIG as never} />
         {/* the globe floats in dark, starry space; zoomed in, the horizon fades into the canvas */}

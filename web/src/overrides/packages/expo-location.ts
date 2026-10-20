@@ -116,12 +116,14 @@ function keepTracking() {
   navigator.geolocation.watchPosition(remember, noteError, { enableHighAccuracy: false, maximumAge: 60_000 });
 }
 
-export async function watchPositionAsync(_options: Location.LocationOptions, callback: Location.LocationCallback): Promise<Location.LocationSubscription> {
+export async function watchPositionAsync(options: Location.LocationOptions, callback: Location.LocationCallback): Promise<Location.LocationSubscription> {
+  // GPS-grade (a phone's browser then reports about once a second) when asked for high accuracy
+  const precise = (options.accuracy ?? 0) >= Location.Accuracy.High;
   const report = (p: GeolocationPosition) => callback(remember(p));
   // show your last known spot right away; the fresh position replaces it when it arrives
   if (latest) setTimeout(() => latest && callback(latest), 0);
   navigator.geolocation.getCurrentPosition(report, () => {}, { maximumAge: 60_000 });
-  const id = navigator.geolocation.watchPosition(report, () => {}, { enableHighAccuracy: false, maximumAge: 60_000 });
+  const id = navigator.geolocation.watchPosition(report, () => {}, precise ? { enableHighAccuracy: true, maximumAge: 0 } : { enableHighAccuracy: false, maximumAge: 60_000 });
   return { remove: () => navigator.geolocation.clearWatch(id) };
 }
 
