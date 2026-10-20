@@ -19,6 +19,12 @@ let asking: Promise<Permission> | null = null;
 
 export function requestForegroundPermissionsAsync(): Promise<Permission> {
   if (decided) return Promise.resolve(decided);
+  // allowed on an earlier visit: no need to wait for the browser (a computer's first fix can take minutes); start
+  // tracking and carry on from the last known spot
+  if (wasGranted('location')) {
+    keepTracking();
+    return Promise.resolve((decided = perm(true, true)));
+  }
   asking ??= new Promise<Permission>((resolve) => {
     if (!navigator.geolocation) return resolve(perm(false, false));
     navigator.geolocation.getCurrentPosition(
@@ -65,7 +71,27 @@ const toLocation = (p: GeolocationPosition): Location.LocationObject => ({
 });
 
 // the latest position the browser has given (from the watcher or a one-off), so asking again is instant
-let latest: Location.LocationObject | null = null;
+// your last known spot, kept on this device: a computer's first fix can take minutes, so on a later visit whim
+// starts from where you were last seen (shown and used right away) until a fresh position comes in
+const LAST_KEY = 'location:last';
+function saveLastKnown(l: Location.LocationObject) {
+  try {
+    localStorage.setItem(LAST_KEY, JSON.stringify({ latitude: l.coords.latitude, longitude: l.coords.longitude, timestamp: l.timestamp }));
+  } catch {}
+}
+function loadLastKnown(): Location.LocationObject | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAST_KEY) ?? 'null');
+    if (!v) return null;
+    return {
+      coords: { latitude: v.latitude, longitude: v.longitude, altitude: null, accuracy: null, altitudeAccuracy: null, heading: null, speed: null },
+      timestamp: v.timestamp,
+    };
+  } catch {
+    return null;
+  }
+}
+let latest: Location.LocationObject | null = typeof window !== 'undefined' && wasGranted('location') ? loadLastKnown() : null;
 /** What Safari said the last time it couldn't give a position (shown in the "Location Unavailable" message). */
 export let lastLocationError = '';
 const noteError = (e: GeolocationPositionError) => {
@@ -76,6 +102,7 @@ const noteError = (e: GeolocationPositionError) => {
 const waiting = new Set<(l: Location.LocationObject) => void>();
 const remember = (p: GeolocationPosition) => {
   latest = toLocation(p);
+  saveLastKnown(latest);
   waiting.forEach((w) => w(latest!));
   waiting.clear();
   return latest;
@@ -91,6 +118,8 @@ function keepTracking() {
 
 export async function watchPositionAsync(_options: Location.LocationOptions, callback: Location.LocationCallback): Promise<Location.LocationSubscription> {
   const report = (p: GeolocationPosition) => callback(remember(p));
+  // show your last known spot right away; the fresh position replaces it when it arrives
+  if (latest) setTimeout(() => latest && callback(latest), 0);
   navigator.geolocation.getCurrentPosition(report, () => {}, { maximumAge: 60_000 });
   const id = navigator.geolocation.watchPosition(report, () => {}, { enableHighAccuracy: false, maximumAge: 60_000 });
   return { remove: () => navigator.geolocation.clearWatch(id) };
