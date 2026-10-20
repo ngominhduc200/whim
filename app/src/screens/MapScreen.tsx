@@ -49,6 +49,10 @@ type Ghost = { key: string; item: MapItem; to: { x: number; y: number } };
 const ignoreMapTap = () => {};
 // tapping the nearby notification: how long the map takes to turn, and the arrow's gap from you and the pin
 const GUIDE_TURN_MS = 1000;
+// while locked: how long each follow-move takes (its easing is what makes the map glide), and how much of each
+// new position is taken (1: all of it, so your cloud stays exactly on its spot)
+const GUIDE_FOLLOW_MS = 700;
+const GUIDE_SMOOTH = 1;
 // where you and the moment end up, as fractions of the screen's height (you just above the capture button)
 const GUIDE_ME_AT = 0.78;
 const GUIDE_IT_AT = 0.2;
@@ -63,7 +67,7 @@ const MAPBOX_FOV = 0.6435011087932844;
  * (H/2) / tan(fov/2)), so how far the center sits along the way, and the zoom, can be solved for exactly. 3D (the
  * map's usual tilt) when that lands close enough for it; flat otherwise.
  */
-function guideCamera(me: [number, number], there: [number, number], H: number) {
+function guideCamera(me: [number, number], there: [number, number], H: number, fixedPitch?: number) {
   const below = H * (GUIDE_ME_AT - 0.5); // you, below the middle
   const above = H * (0.5 - GUIDE_IT_AT); // it, above the middle
   const D = H / 2 / Math.tan(MAPBOX_FOV / 2);
@@ -79,9 +83,9 @@ function guideCamera(me: [number, number], there: [number, number], H: number) {
     const t = back / (back + ahead);
     return { zoom, t };
   };
-  let pitch = TILT_PITCH;
+  let pitch = fixedPitch ?? TILT_PITCH;
   let { zoom, t } = solve(pitch);
-  if (zoom < TILT_ZOOM) {
+  if (fixedPitch == null && zoom < TILT_ZOOM) {
     pitch = 0;
     ({ zoom, t } = solve(0));
   }
@@ -212,8 +216,12 @@ export function MapScreen() {
   const guidingRef = useRef(false);
   const [guideAsked, setGuideAsked] = useState(0);
   useEffect(() => onNotificationTap(() => setGuideAsked((n) => n + 1)), []);
+  // While the arrow is up, the cloud, the arrow and the pin stay locked on screen: as you move, the map follows
+  // you (like navigation in a maps app), turning so the pin stays straight above you, at the same tilt.
+  const guideLockRef = useRef<{ there: [number, number]; pitch: number; me: [number, number] } | null>(null);
   const endGuide = useCallback(() => {
     guidingRef.current = false;
+    guideLockRef.current = null;
     setGuide(null);
   }, []);
   const endCelebration = useCallback(() => {
@@ -359,6 +367,7 @@ export function MapScreen() {
       if (state.gestures.isGestureActive && focusModeRef.current !== 'free') setMode('free');
       if (state.gestures.isGestureActive && guidingRef.current) {
         guidingRef.current = false;
+        guideLockRef.current = null;
         setGuideLeaving(true);
       }
       if (state.gestures.isGestureActive && celebratingRef.current) {
@@ -430,7 +439,9 @@ export function MapScreen() {
       await new Promise((r) => setTimeout(r, GUIDE_TURN_MS + 80));
       const [a, b] = await Promise.all([mapRef.current?.getPointInView(me), mapRef.current?.getPointInView(there)]);
       if (cancelled || !a || !b) return void (guidingRef.current = false);
-      // from just above your cloud to just under the pin's photo (its bottom edge is on the post)
+      // from just above your cloud to just under the pin's photo (its bottom edge is on the post); from here on the
+      // map keeps both on these spots as you move, so the arrow stays put
+      guideLockRef.current = { there, pitch: view.pitch, me };
       setGuide({ from: { x: a[0], y: a[1] - USER_CLOUD_HEIGHT - GUIDE_GAP }, to: { x: b[0], y: b[1] + GUIDE_GAP } });
     })();
     return () => {
@@ -439,6 +450,27 @@ export function MapScreen() {
     // runs once per tap (guideAsked), when the map is ready
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [guideAsked, mapReady]);
+
+  // the lock: each new position of yours moves, turns and zooms the map so you, the arrow and the pin keep their
+  // places on screen (positions are smoothed a little, so the map glides instead of jittering with the GPS)
+  useEffect(() => {
+    const lock = guideLockRef.current;
+    if (!lock || !userLocation || !guidingRef.current) return;
+    const me: [number, number] = [
+      lock.me[0] + (userLocation[0] - lock.me[0]) * GUIDE_SMOOTH,
+      lock.me[1] + (userLocation[1] - lock.me[1]) * GUIDE_SMOOTH,
+    ];
+    lock.me = me;
+    const view = guideCamera(me, lock.there, screenRef.current.height, lock.pitch);
+    cameraRef.current?.setCamera({
+      centerCoordinate: view.center,
+      zoomLevel: view.zoom,
+      heading: bearingDeg(me, lock.there),
+      pitch: lock.pitch,
+      animationMode: 'easeTo',
+      animationDuration: GUIDE_FOLLOW_MS,
+    });
+  }, [userLocation]);
 
   const zoomBy = useCallback(async (delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
