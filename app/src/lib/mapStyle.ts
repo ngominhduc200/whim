@@ -234,6 +234,8 @@ function natureLayers(): Layer[] {
 // darker ink than the doodles so it reads, with a halo of the land color. Which names show depends on the zoom, as
 // on any map: countries from space, cities as you come in, then neighbourhoods, streets and places.
 export const LABEL_FONT = ['Gaegu Regular'];
+// every name in English where the map data has it (most places do), otherwise in the local language
+const NAME = ['coalesce', ['get', 'name_en'], ['get', 'name']];
 const LABEL_INK = PALETTE.label;
 const LABEL_HALO = PALETTE.land;
 // Gaegu draws small for its size (the app scales its text by 1.15 too)
@@ -249,7 +251,7 @@ function label(id: string, sourceLayer: string, minzoom: number, filter: unknown
     minzoom,
     ...(opts.maxzoom ? { maxzoom: opts.maxzoom } : {}),
     filter,
-    layout: { 'text-font': LABEL_FONT, 'text-field': ['get', 'name'], 'text-max-width': 8, 'text-line-height': 1.05, ...layout },
+    layout: { 'text-font': LABEL_FONT, 'text-field': NAME, 'text-max-width': 8, 'text-line-height': 1.05, ...layout },
     paint: {
       'text-color': LABEL_INK,
       'text-halo-color': LABEL_HALO,
@@ -296,7 +298,7 @@ function roadNameLayers(): Layer[] {
 // to it.
 function placeLayers(): Layer[] {
   const shown = ['<=', ['get', 'filterrank'], ['step', ['zoom'], 1, 14, 2, 16, 3, 17, 4, 18, 5]];
-  const notLandmark = ['!', ['in', ['get', 'name'], ['literal', LANDMARK_NAMES]]];
+  const notLandmark = ['!', ['in', NAME, ['literal', LANDMARK_NAMES]]];
   const parks = ['==', ['get', 'class'], 'park_like'];
   return [
     label('label-parks', 'poi_label', 13, ['all', parks, ['has', 'name'], shown, notLandmark], {
@@ -335,7 +337,7 @@ function areaNameLayers(): Layer[] {
   const rivers = ['match', ['get', 'class'], ['river', 'canal', 'stream'], true, false];
   const summits = ['all', ['==', ['get', 'class'], 'landform'], ['match', ['get', 'maki'], ['mountain', 'volcano'], true, false]];
   // (cities with a skyline doodle have their name under it)
-  const notLandmark = ['!', ['in', ['get', 'name'], ['literal', LANDMARK_NAMES]]];
+  const notLandmark = ['!', ['in', NAME, ['literal', LANDMARK_NAMES]]];
   const settlementRank = ['<=', ['get', 'symbolrank'], ['step', ['zoom'], 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 16, 18]];
   return [
     label('label-rivers', 'natural_label', 12, ['all', rivers, ['==', ['geometry-type'], 'LineString']], {
