@@ -3,7 +3,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ICONS } from './landmark-icons.mjs';
+import { ICONS, OUT } from './landmark-icons.mjs';
 import { STORE_ICONS } from './store-icons.mjs';
 import PALETTE from '../src/lib/palette.json' with { type: 'json' };
 
@@ -39,11 +39,25 @@ const handDrawn = (svg, seed = 4) => {
 
 let iconSeed = 1;
 const ALL = [...Object.entries(ICONS).map(([n, svg]) => [n, svg, outDir]), ...Object.entries(STORE_ICONS).map(([n, svg]) => [n, svg, storesDir])];
+// Landmarks are all drawn as outlines, like the rest of the map's doodles: a solid shape becomes a land-colored one
+// with an ink outline, solid accents (a hull, a roof) are outlined too (tiny dots like eyes stay solid), and white
+// details drawn on a solid shape (windows, stripes) become thin ink lines.
+const DETAIL_WIDTH = 1.3;
+const outlined = (svg) =>
+  svg
+    .replace(/<svg([^>]*)>/, (m, attrs) => (/style="[^"]*(fill|stroke)/.test(attrs) ? m : `<svg${attrs.replace(/ style="[^"]*"/, '')} ${OUT}>`))
+    .replace(/<(path|rect|ellipse|circle)([^>]*?)style="fill:#000"([^>]*)>/g, (m, tag, a, b) => {
+      const r = `${a}${b}`.match(/\br="([\d.]+)"/);
+      return tag === 'circle' && r && Number(r[1]) <= 2.6 ? m : `<${tag}${a}style="fill:#fff"${b}>`;
+    })
+    .replace(/stroke:#fff;stroke-width:([\d.]+)/g, (_, w) => `stroke:#000;stroke-width:${Math.min(Number(w), DETAIL_WIDTH)}`)
+    .replaceAll('stroke:#fff', 'stroke:#000');
+
 for (const [name, svg, dir] of ALL) {
   // root `style` holds the fill/stroke the icon inherits; CSS transforms (the plane's rotation) are applied by Mapbox instead.
   // Tinted to the map palette: black ink -> palette ink, white insides -> the land color. Icons with no
   // explicit fill default to ink via the root fill attribute.
-  const src = svg
+  const src = (dir === outDir ? outlined(svg.replace(/transform:rotate\([^)]*\)/, '')) : svg)
     .replace(/transform:rotate\([^)]*\)/, '')
     .replaceAll('#000', PALETTE.ink)
     .replaceAll('#fff', PALETTE.land)

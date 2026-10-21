@@ -1,4 +1,4 @@
-import Mapbox, { Atmosphere, Camera, Images, MapView, MarkerView, StyleImport, type MapState } from '@rnmapbox/maps';
+import Mapbox, { Atmosphere, Camera, Images, LocationPuck, MapView, MarkerView, StyleImport, type MapState } from '@rnmapbox/maps';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import { router, useFocusEffect } from 'expo-router';
@@ -6,7 +6,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BUTTON_SHADOW, CircleButton } from '@/components/CircleButton';
@@ -20,7 +20,7 @@ import { ClusterPin } from '@/components/map/ClusterPin';
 import { GatherIn, MERGE_OUT_MS, MergeOut, SplitIn } from '@/components/map/SplitIn';
 import { PIN_ANCHOR, PIN_WIDTH, PostPin } from '@/components/map/PostPin';
 import { onPostViewClosing } from '@/lib/postView';
-import { USER_CLOUD_HEIGHT, USER_MARKER_ANCHOR, UserMarker } from '@/components/map/UserMarker';
+import { USER_CLOUD_HEIGHT, USER_CLOUD_WIDTH, USER_MARKER_ANCHOR, UserMarker } from '@/components/map/UserMarker';
 import { GuideArrow } from '@/components/map/GuideArrow';
 import { onNotificationTap } from '@/lib/notify';
 import { SEED_POSTS } from '@/data/seedPosts';
@@ -118,6 +118,11 @@ const AREAS_THROTTLE_MS = 1200;
 const GLIDE_AHEAD_MAX_MS = 2500;
 const GLIDE_EASE_S = 0.3;
 const GLIDE_JUMP_M = 200;
+// Focus on the phone: the map's own "follow me" camera (it smooths your position and moves the map natively, every
+// frame, so it keeps pace with you even driving). The browser map has no such mode, so the web follows you itself.
+const NATIVE_FOLLOW = Platform.OS !== 'web';
+// Mapbox's location dot drives that camera; it's drawn with a blank image (your cloud is drawn by the app)
+const BLANK_PUCK = 'puck-blank';
 // GPS wander while you stand still: a new position closer than its margin of error (at least / at most this many
 // metres) is ignored, unless the phone says you're moving at walking speed (m/s)
 const STILL_MIN_M = 5;
@@ -150,6 +155,7 @@ const MAP_IMAGES = {
   [FLOWER_ICON]: { image: require('@/assets/landmarks/flower.png'), scale: 3 },
   // the compass: a hand-drawn red needle instead of Mapbox's default
   compass: { image: require('@/assets/landmarks/compass.png'), scale: 3 },
+  [BLANK_PUCK]: { image: require('@/assets/landmarks/blank.png'), scale: 1 },
   // the doodles for kinds of places (cafés, shops…)
   ...STORE_IMAGES,
 };
@@ -261,6 +267,23 @@ export function MapScreen() {
   }, []);
   const [focusMode, setFocusMode] = useState<FocusMode>('free');
   const focusModeRef = useRef<FocusMode>('free');
+  // On the phone, once Focus has flown to you, the map's own follow camera takes over (see NATIVE_FOLLOW), at this
+  // zoom (Focus taps and + / − change it; the tilt goes with it: 3D from TILT_ZOOM)
+  const [nativeFollowing, setNativeFollowing] = useState(false);
+  const nativeFollowingRef = useRef(false);
+  const [followZoom, setFollowZoom] = useState(FOCUS_ZOOM);
+  const followZoomRef = useRef(FOCUS_ZOOM);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setNativeFollow = useCallback((on: boolean, zoom?: number) => {
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = null;
+    if (zoom != null) {
+      followZoomRef.current = zoom;
+      setFollowZoom(zoom);
+    }
+    nativeFollowingRef.current = on;
+    setNativeFollowing(on);
+  }, []);
   // while a post is open, the map stays put (the photo lands back on its pin)
   const viewingPostRef = useRef(false);
   // the map's own moves (Focus, + / −, the auto-tilt) play out before following takes over again
@@ -275,7 +298,7 @@ export function MapScreen() {
   const followGuide = useCallback((me: [number, number]) => {
     const lock = guideLockRef.current;
     if (!lock || !guidingRef.current) {
-      if (focusModeRef.current === 'free' || viewingPostRef.current || Date.now() < followHeldUntil.current) return;
+      if (NATIVE_FOLLOW || focusModeRef.current === 'free' || viewingPostRef.current || Date.now() < followHeldUntil.current) return;
       cameraRef.current?.setCamera({ centerCoordinate: me, animationMode: 'none', animationDuration: 0 });
       return;
     }
@@ -513,10 +536,14 @@ export function MapScreen() {
     [showPost, stopFollowing],
   );
 
-  const setMode = useCallback((mode: FocusMode) => {
-    focusModeRef.current = mode;
-    setFocusMode(mode);
-  }, []);
+  const setMode = useCallback(
+    (mode: FocusMode) => {
+      focusModeRef.current = mode;
+      setFocusMode(mode);
+      if (mode === 'free') setNativeFollow(false);
+    },
+    [setNativeFollow],
+  );
 
   // The native splash hides right away; the doodle loader covers the map until its style has loaded, then fades.
   const [mapReady, setMapReady] = useState(false);
@@ -640,11 +667,18 @@ export function MapScreen() {
   const zoomBy = useCallback(async (delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     stopFollowing();
+    // following you: the follow camera zooms (and tilts, from TILT_ZOOM)
+    if (nativeFollowingRef.current) {
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, followZoomRef.current + delta));
+      setNativeFollow(true, zoom);
+      setMode(zoom >= TILT_ZOOM ? 'tilted' : 'located');
+      return;
+    }
     const zoom = await mapRef.current?.getZoom();
     if (zoom == null) return;
     holdFollow(300);
     cameraRef.current?.zoomTo(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom + delta)), 300);
-  }, [stopFollowing, holdFollow]);
+  }, [stopFollowing, holdFollow, setNativeFollow, setMode]);
 
   // Focus: tap 1 centers on you (flat), tap 2 zooms in close (zoom 17, so it tilts to 3D), tap 3 goes back.
   const onFocus = useCallback(async () => {
@@ -653,6 +687,13 @@ export function MapScreen() {
     const mode = focusModeRef.current;
     // (centered on where your cloud is right now, as following keeps it)
     const center = shownRef.current ? { centerCoordinate: shownRef.current } : {};
+    if (nativeFollowingRef.current && mode !== 'free') {
+      // the follow camera does the zoom and tilt
+      const zoom = mode === 'located' ? CLOSE_ZOOM : FOCUS_ZOOM;
+      setNativeFollow(true, zoom);
+      setMode(mode === 'located' ? 'tilted' : 'located');
+      return;
+    }
     if (mode === 'located') {
       holdFollow(900);
       cameraRef.current?.setCamera({ ...center, zoomLevel: CLOSE_ZOOM, pitch: TILT_PITCH, animationMode: 'easeTo', animationDuration: 900 });
@@ -681,7 +722,14 @@ export function MapScreen() {
       animationDuration: duration,
     });
     setMode(target >= TILT_ZOOM ? 'tilted' : 'located');
-  }, [setMode, stopFollowing, holdFollow]);
+    // once there, the map's own follow camera takes over (unless you've moved the map meanwhile)
+    if (NATIVE_FOLLOW) {
+      if (settleTimer.current) clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(() => {
+        if (focusModeRef.current !== 'free') setNativeFollow(true, target);
+      }, duration + 50);
+    }
+  }, [setMode, stopFollowing, holdFollow, setNativeFollow]);
 
   const openProfile = useCallback(() => {
     Haptics.selectionAsync();
@@ -725,8 +773,22 @@ export function MapScreen() {
         logoEnabled={false}
         attributionEnabled={false}
       >
-        <Camera ref={cameraRef} defaultSettings={START} minZoomLevel={MIN_ZOOM} maxZoomLevel={MAX_ZOOM} />
-        {showPuck && userLocation && !viewingPost && <GlidingUserMarker subscribe={subscribeShown} />}
+        <Camera
+          ref={cameraRef}
+          defaultSettings={START}
+          minZoomLevel={MIN_ZOOM}
+          maxZoomLevel={MAX_ZOOM}
+          // (paused while a post is open, so its pin stays where the photo lands back)
+          followUserLocation={nativeFollowing && !viewingPost}
+          // (the library's UserTrackingMode.Follow; not imported, as the web build doesn't have it)
+          followUserMode={'normal' as never}
+          followZoomLevel={followZoom}
+          followPitch={followZoom >= TILT_ZOOM ? TILT_PITCH : 0}
+        />
+        {NATIVE_FOLLOW && showPuck && (
+          <LocationPuck topImage={BLANK_PUCK} bearingImage={BLANK_PUCK} shadowImage={BLANK_PUCK} puckBearingEnabled={false} pulsing={{ isEnabled: false }} />
+        )}
+        {showPuck && userLocation && !viewingPost && !nativeFollowing && <GlidingUserMarker subscribe={subscribeShown} />}
         {/* the basemap flattened to one canvas color (theme 'custom' isn't in the library's types yet) */}
         <StyleImport id="basemap" existing config={STANDARD_CONFIG as never} />
         {/* the globe floats in dark, starry space; zoomed in, the horizon fades into the canvas */}
@@ -788,6 +850,16 @@ export function MapScreen() {
             </MarkerView>
           ))}
       </MapView>
+      {/* following you (phone): the follow camera keeps you at the middle of the screen, so your cloud (the same one,
+          tap it for "You") stands there while the map moves under it */}
+      {nativeFollowing && !viewingPost && showPuck && (
+        <View
+          pointerEvents="box-none"
+          style={[styles.followedCloud, { left: screen.width / 2 - USER_CLOUD_WIDTH / 2, top: screen.height / 2 - USER_CLOUD_HEIGHT }]}
+        >
+          <UserMarker />
+        </View>
+      )}
 
       {!mapReady && (
         <Animated.View exiting={FadeOut.duration(350)} style={[StyleSheet.absoluteFill, styles.loader]} pointerEvents="none">
@@ -858,6 +930,7 @@ export function MapScreen() {
 }
 
 const styles = StyleSheet.create({
+  followedCloud: { position: 'absolute', width: USER_CLOUD_WIDTH, height: USER_CLOUD_HEIGHT },
   root: { flex: 1, backgroundColor: '#0d0d0f' },
   abs: { position: 'absolute' },
   // the loader sits on the map's water color, so the map appears under it seamlessly

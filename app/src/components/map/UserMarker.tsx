@@ -34,6 +34,8 @@ const popIn = () =>
 // Everything else (the bubble above) is drawn outside the box. The map treats the whole box as the marker, so a
 // bigger box would block taps on the pins underneath it, even where nothing is drawn.
 const CLOUD_WIDTH = 41;
+/** How wide the cloud is (its box: see USER_MARKER_ANCHOR). */
+export const USER_CLOUD_WIDTH = CLOUD_WIDTH;
 export const USER_MARKER_ANCHOR = { x: 0.5, y: 1 };
 
 /** Your location: the doodled cloud. Tap it and a "You" speech bubble pops up above it for a few seconds. */
