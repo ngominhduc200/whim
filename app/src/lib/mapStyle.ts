@@ -2,6 +2,8 @@ import type { StandardStyleConfig } from '@rnmapbox/maps';
 
 import { CANVAS_THEME_LUT } from './canvasTheme';
 import PALETTE from './palette.json';
+import { LANDMARK_NAMES } from '@/data/landmarks';
+import { SKIPPED_MAKI, STORE_ICON_EXPRESSION } from '@/data/storeIcons';
 
 /**
  * The map is a canvas: your Mapbox Standard style (from Studio) underneath, flattened to one color so all its
@@ -163,6 +165,27 @@ function wavesLayer(): Layer {
 // when the map rotates; doodles that would crowd each other are skipped. Big forests come from the terrain
 // tiles when zoomed out and the detailed street tiles closer in.
 export const FLOWER_ICON = 'flower'; // registered by the map; trees and mountains use the landmark doodles
+// Forests, woods and parks: invisible here, only so the map can say where they are on screen; components/map/
+// AreaDoodles fills them with little upright trees and flowers. Big forests come from the terrain tiles when zoomed
+// out and the detailed street tiles closer in.
+export const AREA_LAYERS = ['area-forest-far', 'area-forest', 'area-park'];
+function areaLayers(): Layer[] {
+  const area = (id: string, source: Layer['source'], sourceLayer: string, filter: unknown, minzoom: number, maxzoom?: number): Layer => ({
+    id,
+    type: 'fill',
+    source,
+    'source-layer': sourceLayer,
+    minzoom,
+    ...(maxzoom ? { maxzoom } : {}),
+    filter,
+    paint: { 'fill-color': PAPER, 'fill-opacity': 0 },
+  });
+  return [
+    area(AREA_LAYERS[0], 'terrain', 'landcover', ['==', ['get', 'class'], 'wood'], 8, 10),
+    area(AREA_LAYERS[1], 'streets', 'landuse', ['match', ['get', 'class'], ['wood', 'scrub'], true, false], 10),
+    area(AREA_LAYERS[2], 'streets', 'landuse', ['match', ['get', 'class'], ['park', 'grass', 'cemetery'], true, false], 12),
+  ];
+}
 
 function natureLayers(): Layer[] {
   const doodle = (
@@ -192,20 +215,183 @@ function natureLayers(): Layer[] {
     },
     paint: { 'icon-emissive-strength': UNLIT },
   });
-  const wood = ['match', ['get', 'class'], ['wood', 'scrub'], true, false];
-  const parks = ['match', ['get', 'class'], ['park', 'grass', 'cemetery'], true, false];
   const summits = ['all', ['==', ['get', 'class'], 'landform'], ['match', ['get', 'maki'], ['mountain', 'volcano'], true, false], ['==', ['geometry-type'], 'Point']];
+  // (forests, woods and parks themselves are filled with trees: see areaLayers; far out, before those fills
+  // start, a big forest still gets a doodle or two)
   return [
-    doodle('doodle-forest-far', 'terrain', 'landcover', ['==', ['get', 'class'], 'wood'], 'pine', 7, { maxzoom: 10 }),
-    doodle('doodle-forest-far-2', 'terrain', 'landcover', ['==', ['get', 'class'], 'wood'], 'tree', 7, { maxzoom: 10, offset: [70, 45] }),
-    doodle('doodle-forest', 'streets', 'landuse', wood, 'pine', 10),
-    doodle('doodle-forest-2', 'streets', 'landuse', wood, 'tree', 10, { offset: [55, -40] }),
+    doodle('doodle-forest-far', 'terrain', 'landcover', ['==', ['get', 'class'], 'wood'], 'pine', 7, { maxzoom: 8 }),
+    doodle('doodle-forest-far-2', 'terrain', 'landcover', ['==', ['get', 'class'], 'wood'], 'tree', 7, { maxzoom: 8, offset: [70, 45] }),
     doodle('doodle-national-park', 'streets', 'landuse_overlay', ['==', ['get', 'class'], 'national_park'], 'pine', 8, { offset: [-60, 30] }),
-    doodle('doodle-park', 'streets', 'landuse', parks, FLOWER_ICON, 12),
-    doodle('doodle-park-2', 'streets', 'landuse', parks, 'tree', 12, { offset: [-45, 25] }),
     doodle('doodle-peaks', 'streets', 'natural_label', summits, 'mountain', 7, {
       size: ['interpolate', ['linear'], ['zoom'], 7, 0.3, 12, 0.5, 16, 0.75],
     }),
+  ];
+}
+
+// ---- Names ----
+
+// Every name on the map, in Gaegu (the map draws label text with the app's own font: see the MapView setup), in a
+// darker ink than the doodles so it reads, with a halo of the land color. Which names show depends on the zoom, as
+// on any map: countries from space, cities as you come in, then neighbourhoods, streets and places.
+export const LABEL_FONT = ['Gaegu Regular'];
+const LABEL_INK = PALETTE.label;
+const LABEL_HALO = PALETTE.land;
+// Gaegu draws small for its size (the app scales its text by 1.15 too)
+const G = 1.15;
+const zoomSize = (...stops: number[]) => ['interpolate', ['linear'], ['zoom'], ...stops.map((v, i) => (i % 2 ? v * G : v))];
+
+function label(id: string, sourceLayer: string, minzoom: number, filter: unknown, layout: Record<string, unknown>, opts: { maxzoom?: number; paint?: Record<string, unknown> } = {}): Layer {
+  return {
+    id,
+    type: 'symbol',
+    source: 'streets',
+    'source-layer': sourceLayer,
+    minzoom,
+    ...(opts.maxzoom ? { maxzoom: opts.maxzoom } : {}),
+    filter,
+    layout: { 'text-font': LABEL_FONT, 'text-field': ['get', 'name'], 'text-max-width': 8, 'text-line-height': 1.05, ...layout },
+    paint: {
+      'text-color': LABEL_INK,
+      'text-halo-color': LABEL_HALO,
+      'text-halo-width': 1.6,
+      'text-emissive-strength': UNLIT,
+      'icon-emissive-strength': UNLIT,
+      ...opts.paint,
+    },
+  };
+}
+
+// Streets: the name of every road the map draws, from the zoom it starts drawing that kind of road (a bit after,
+// for the big ones, so a road is on screen before its name), written along it.
+const ROAD_NAME_FROM: Record<keyof typeof ROAD_CLASSES, number> = { motorway: 10, primary: 11, secondary: 13, street: 15 };
+
+function roadNameLayers(): Layer[] {
+  return (Object.keys(ROAD_CLASSES) as (keyof typeof ROAD_CLASSES)[]).map((group) =>
+    label(
+      `label-road-${group}`,
+      'road',
+      ROAD_NAME_FROM[group],
+      [
+        'all',
+        ['==', ['geometry-type'], 'LineString'],
+        ['match', ['get', 'class'], ROAD_CLASSES[group], true, false],
+        ['has', 'name'],
+      ],
+      {
+        'symbol-placement': 'line',
+        // along the street, but facing you: in 3D a name stands up instead of lying flat on the tilted ground
+        'text-pitch-alignment': 'viewport',
+        'text-size': zoomSize(ROAD_NAME_FROM[group], 11, 16, 13, 19, 16),
+        'text-max-angle': 30,
+        'symbol-spacing': 320,
+        'text-padding': 4,
+      },
+    ),
+  );
+}
+
+// Places on the map (shops, cafés, restaurants, schools…) with a doodle for their kind: from zoom 12, only the
+// best known, then more of them the closer you come (Mapbox ranks them 1–5 by how much they matter on a map).
+// Parks only get their name (their trees and flowers are already drawn); landmarks with their own doodle are left
+// to it.
+function placeLayers(): Layer[] {
+  const shown = ['<=', ['get', 'filterrank'], ['step', ['zoom'], 1, 14, 2, 16, 3, 17, 4, 18, 5]];
+  const notLandmark = ['!', ['in', ['get', 'name'], ['literal', LANDMARK_NAMES]]];
+  const parks = ['==', ['get', 'class'], 'park_like'];
+  return [
+    label('label-parks', 'poi_label', 13, ['all', parks, ['has', 'name'], shown, notLandmark], {
+      'text-size': zoomSize(13, 12, 17, 15),
+      'text-padding': 6,
+    }),
+    label(
+      'label-places',
+      'poi_label',
+      12,
+      ['all', ['!', parks], ['has', 'name'], ['!', ['in', ['get', 'maki'], ['literal', SKIPPED_MAKI]]], shown, notLandmark],
+      {
+        'icon-image': STORE_ICON_EXPRESSION,
+        // big from the start (zoom 12), a touch bigger up close
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.62, 16, 0.72, 19, 0.85],
+        'icon-padding': 4,
+        'text-size': zoomSize(12, 13, 16, 14, 19, 15),
+        // the name beside its doodle, on whichever side has room
+        'text-variable-anchor': ['top', 'bottom', 'right', 'left'],
+        'text-radial-offset': 1.25,
+        'text-justify': 'auto',
+        'text-max-width': 7,
+        'text-padding': 3,
+        // a place keeps its doodle when its name doesn't fit
+        'text-optional': true,
+        // the most important places win where they'd overlap
+        'symbol-sort-key': ['get', 'filterrank'],
+      },
+    ),
+  ];
+}
+
+// Water, mountains, neighbourhoods, cities, states and countries.
+function areaNameLayers(): Layer[] {
+  const water = ['match', ['get', 'class'], ['ocean', 'sea', 'bay', 'water', 'reservoir'], true, false];
+  const rivers = ['match', ['get', 'class'], ['river', 'canal', 'stream'], true, false];
+  const summits = ['all', ['==', ['get', 'class'], 'landform'], ['match', ['get', 'maki'], ['mountain', 'volcano'], true, false]];
+  // (cities with a skyline doodle have their name under it)
+  const notLandmark = ['!', ['in', ['get', 'name'], ['literal', LANDMARK_NAMES]]];
+  const settlementRank = ['<=', ['get', 'symbolrank'], ['step', ['zoom'], 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 16, 18]];
+  return [
+    label('label-rivers', 'natural_label', 12, ['all', rivers, ['==', ['geometry-type'], 'LineString']], {
+      'symbol-placement': 'line',
+      'text-pitch-alignment': 'viewport',
+      'text-size': zoomSize(12, 12, 17, 15),
+      'text-letter-spacing': 0.1,
+      'symbol-spacing': 400,
+    }),
+    label('label-water', 'natural_label', 3, ['all', water, ['==', ['geometry-type'], 'Point']], {
+      'text-size': ['interpolate', ['linear'], ['zoom'], 3, ['match', ['get', 'class'], 'ocean', 17 * G, 13 * G], 12, ['match', ['get', 'class'], ['ocean', 'sea'], 20 * G, 15 * G]],
+      'text-letter-spacing': 0.12,
+      'text-max-width': 9,
+    }),
+    label('label-water-lines', 'natural_label', 3, ['all', water, ['==', ['geometry-type'], 'LineString']], {
+      'symbol-placement': 'line-center',
+      'text-size': zoomSize(3, 13, 12, 17),
+      'text-letter-spacing': 0.12,
+    }),
+    // under the little mountain doodle on each summit
+    label('label-summits', 'natural_label', 10, ['all', summits, ['==', ['geometry-type'], 'Point']], {
+      'text-size': zoomSize(10, 11, 16, 14),
+      'text-anchor': 'top',
+      'text-offset': [0, 0.9],
+      'text-optional': true,
+    }),
+    label('label-neighbourhoods', 'place_label', 12, ['all', ['==', ['get', 'class'], 'settlement_subdivision'], settlementRank], {
+      'text-size': zoomSize(12, 12, 16, 15),
+      'text-letter-spacing': 0.08,
+      'text-max-width': 7,
+      'text-padding': 8,
+    }, { maxzoom: 17 }),
+    label('label-cities', 'place_label', 3, ['all', ['==', ['get', 'class'], 'settlement'], settlementRank, notLandmark], {
+      'text-size': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        4,
+        ['match', ['get', 'type'], 'city', 14 * G, 11 * G],
+        10,
+        ['match', ['get', 'type'], 'city', 20 * G, 'town', 16 * G, 14 * G],
+        14,
+        ['match', ['get', 'type'], 'city', 24 * G, 'town', 18 * G, 15 * G],
+      ],
+      'text-max-width': 8,
+      'text-padding': 6,
+    }, { maxzoom: 15 }),
+    label('label-states', 'place_label', 4, ['==', ['get', 'class'], 'state'], {
+      'text-size': zoomSize(4, 12, 8, 15),
+      'text-letter-spacing': 0.15,
+      'text-transform': 'uppercase',
+    }, { maxzoom: 8 }),
+    label('label-countries', 'place_label', 1, ['==', ['get', 'class'], 'country'], {
+      'text-size': zoomSize(1, 12, 3, 16, 6, 20),
+      'text-max-width': 7,
+    }, { maxzoom: 7 }),
   ];
 }
 
@@ -217,5 +403,17 @@ export const DOODLE_SOURCES = {
   terrain: 'mapbox://mapbox.mapbox-terrain-v2',
 } as const;
 
-/** Drawn over the flattened basemap, in this order: the water, its waves, roads, then nature. */
-export const DOODLE_LAYERS: Layer[] = [waterLayer(), wavesLayer(), roadLayer(), ...natureLayers()];
+/**
+ * Drawn over the flattened basemap, in this order: the water, its waves, roads, nature, then the names (the last
+ * ones are placed first where names would overlap: countries and cities, then neighbourhoods, places and streets).
+ */
+export const DOODLE_LAYERS: Layer[] = [
+  waterLayer(),
+  wavesLayer(),
+  ...areaLayers(),
+  roadLayer(),
+  ...natureLayers(),
+  ...roadNameLayers(),
+  ...placeLayers(),
+  ...areaNameLayers(),
+];

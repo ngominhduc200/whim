@@ -1,0 +1,15 @@
+diff --git a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXMapView.swift b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXMapView.swift
+index 3b25490..80d2f06 100644
+--- a/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXMapView.swift
++++ b/node_modules/@rnmapbox/maps/ios/RNMBX/RNMBXMapView.swift
+@@ -265,7 +265,9 @@ open class RNMBXMapView: UIView, RCTInvalidating {
+     if let mapViewImpl = mapViewImpl, let mapViewInstance = createAndAddMapViewImpl(mapViewImpl, self) {
+       _mapView = mapViewInstance
+     } else {
+-      _mapView = MapView(frame: self.bounds, mapInitOptions:  MapInitOptions())
++      // whim: every label is drawn on the phone in the app's font (Gaegu), not with Mapbox's server fonts
++      let glyphs = GlyphsRasterizationOptions(rasterizationMode: .allGlyphsRasterizedLocally, fontFamilies: ["Gaegu"])
++      _mapView = MapView(frame: self.bounds, mapInitOptions: MapInitOptions(mapOptions: MapOptions(glyphsRasterizationOptions: glyphs)))
+       _mapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+       addSubview(_mapView)
+     }

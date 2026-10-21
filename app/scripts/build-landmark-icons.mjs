@@ -4,11 +4,15 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ICONS } from './landmark-icons.mjs';
+import { STORE_ICONS } from './store-icons.mjs';
 import PALETTE from '../src/lib/palette.json' with { type: 'json' };
 
 const SCALE = 3;
-const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'landmarks');
+const assetsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets');
+const outDir = join(assetsDir, 'landmarks');
+const storesDir = join(assetsDir, 'stores');
 mkdirSync(outDir, { recursive: true });
+mkdirSync(storesDir, { recursive: true });
 
 // Hand-drawn look: a little turbulence displaces every edge, so straight sides and sharp corners waver like
 // a pen line (the same "wobble" filter the old web map used). The canvas is padded so nothing gets clipped.
@@ -34,7 +38,8 @@ const handDrawn = (svg, seed = 4) => {
 };
 
 let iconSeed = 1;
-for (const [name, svg] of Object.entries(ICONS)) {
+const ALL = [...Object.entries(ICONS).map(([n, svg]) => [n, svg, outDir]), ...Object.entries(STORE_ICONS).map(([n, svg]) => [n, svg, storesDir])];
+for (const [name, svg, dir] of ALL) {
   // root `style` holds the fill/stroke the icon inherits; CSS transforms (the plane's rotation) are applied by Mapbox instead.
   // Tinted to the map palette: black ink -> palette ink, white insides -> the land color. Icons with no
   // explicit fill default to ink via the root fill attribute.
@@ -44,9 +49,9 @@ for (const [name, svg] of Object.entries(ICONS)) {
     .replaceAll('#fff', PALETTE.land)
     .replace('<svg ', `<svg xmlns="http://www.w3.org/2000/svg" fill="${PALETTE.ink}" `);
   const png = new Resvg(handDrawn(src, iconSeed++), { fitTo: { mode: 'zoom', value: SCALE } }).render().asPng();
-  writeFileSync(join(outDir, `${name}.png`), png);
+  writeFileSync(join(dir, `${name}.png`), png);
 }
-console.log(`wrote ${Object.keys(ICONS).length} icons to ${outDir}`);
+console.log(`wrote ${Object.keys(ICONS).length} landmark and ${Object.keys(STORE_ICONS).length} place icons`);
 
 // Hand-drawn line textures for the roads: one smooth stroke that
 // wiggles side to side, like a "wiggle/roughen" effect with frequency 300%, wiggle 4%, smoothen 100%.
@@ -143,6 +148,7 @@ const WAVES = `<svg xmlns="http://www.w3.org/2000/svg" width="140" height="140" 
 </svg>`;
 writeFileSync(join(outDir, 'water-waves.png'), new Resvg(WAVES, { fitTo: { mode: 'zoom', value: SCALE } }).render().asPng());
 console.log('wrote water-waves.png');
+
 
 // A flat color theme for the Standard basemap: a 32×32×32 color lookup table (laid out as a 1024×32 image)
 // that maps every color to the canvas color. Standard then draws everything (land, water, parks, buildings,

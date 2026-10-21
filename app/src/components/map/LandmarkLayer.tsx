@@ -1,6 +1,8 @@
 import { Images, ShapeSource, SymbolLayer, type SymbolLayerStyle } from '@rnmapbox/maps';
 
 import { LANDMARK_IMAGES, LANDMARKS } from '@/data/landmarks';
+import { LABEL_FONT } from '@/lib/mapStyle';
+import PALETTE from '@/lib/palette.json';
 
 // Each place has its own zoom range, but `zoom` can't be compared per feature in a filter,
 // so places are split into one layer per (minZoom, maxZoom) range.
@@ -20,10 +22,24 @@ const style: SymbolLayerStyle = {
   iconSize: ['interpolate', ['linear'], ['zoom'], 9, 0.45, 18.5, 1.4],
   iconRotate: ['match', ['get', 'icon'], 'plane', 50, 0],
   iconAllowOverlap: true,
-  iconIgnorePlacement: true,
+  // other names and places keep clear of it
+  iconIgnorePlacement: false,
   // exact doodle color, unaffected by the map's day lighting
   iconEmissiveStrength: 1,
-  // doodles only: the map shows no names
+  // the name under the doodle, in Gaegu
+  textField: ['get', 'name'],
+  textFont: LABEL_FONT,
+  textSize: ['interpolate', ['linear'], ['zoom'], 11, 12 * 1.15, 18, 16 * 1.15],
+  textAnchor: 'top',
+  textOffset: [0, 0.3],
+  textMaxWidth: 8,
+  textLineHeight: 1.05,
+  textColor: PALETTE.label,
+  textHaloColor: PALETTE.land,
+  textHaloWidth: 1.6,
+  textEmissiveStrength: 1,
+  // the doodle always shows; its name only where it has room
+  textOptional: true,
 };
 
 export function LandmarkLayer() {

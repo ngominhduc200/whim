@@ -9,6 +9,28 @@ import { Asset } from 'expo-asset';
 import MapContext from '@rnmapbox/maps/lib/module/web/MapContext';
 
 import MapboxGL from '@rnmapbox/maps';
+import mapboxgl from 'mapbox-gl';
+
+import { FONTS } from '@/components/Text';
+
+// Every label is drawn in the browser in the app's font (Gaegu, already loaded before the map appears), not with
+// Mapbox's server fonts, as on the phone. The library makes its map with `new mapboxgl.Map(...)`, so the option is
+// added there.
+// (Safari draws text in a font on a canvas only once it has drawn with it there: until then it falls back to a serif,
+// and the map would keep those first letters. So the font is drawn once on a canvas before the map starts.)
+function warmUpFont() {
+  const ctx = document.createElement('canvas').getContext('2d');
+  if (!ctx) return;
+  ctx.font = `48px ${FONTS.regular}`;
+  ctx.fillText('Aa', 0, 48);
+}
+const RealMap = mapboxgl.Map;
+(mapboxgl as unknown as { Map: unknown }).Map = class extends RealMap {
+  constructor(options: ConstructorParameters<typeof RealMap>[0]) {
+    warmUpFont();
+    super({ ...options, localFontFamily: FONTS.regular });
+  }
+};
 
 export * from '@rnmapbox/maps';
 export { default } from '@rnmapbox/maps';

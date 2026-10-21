@@ -13,6 +13,7 @@ import { BUTTON_SHADOW, CircleButton } from '@/components/CircleButton';
 import { DoodleLoader } from '@/components/DoodleLoader';
 import { PostedCelebration } from '@/components/PostedCelebration';
 import { DoodleIcon, ICON_COLOR } from '@/components/icons/DoodleIcon';
+import { AreaDoodles, useAreaDoodles } from '@/components/map/AreaDoodles';
 import { CanvasLayers } from '@/components/map/CanvasLayers';
 import { LandmarkLayer } from '@/components/map/LandmarkLayer';
 import { ClusterPin } from '@/components/map/ClusterPin';
@@ -23,6 +24,7 @@ import { USER_CLOUD_HEIGHT, USER_MARKER_ANCHOR, UserMarker } from '@/components/
 import { GuideArrow } from '@/components/map/GuideArrow';
 import { onNotificationTap } from '@/lib/notify';
 import { SEED_POSTS } from '@/data/seedPosts';
+import { STORE_IMAGES } from '@/data/storeIcons';
 import { buildClusters, CLUSTER_MAX_ZOOM, screenOffset, useClusters, type Bounds, type MapItem } from '@/lib/clusters';
 import { ShutterButton } from '@/components/ShutterButton';
 import { BAR_ICON, CONTROL_RIGHT, CONTROL_SIZE, EDGE, PROFILE_RIGHT, PROFILE_SIZE, PROFILE_TOP, useMapControlsLayout } from '@/lib/layout';
@@ -54,8 +56,8 @@ const GUIDE_MIN_ARROW = 24;
 // where you and the moment end up, as fractions of the screen's height (you well clear of the capture button)
 const GUIDE_ME_AT = 0.7;
 const GUIDE_IT_AT = 0.2;
-// no closer than 19 taps of + from the start (1.6), where streets and doodles still show, so the map is seen moving
-const GUIDE_MAX_ZOOM = 20.6;
+// no closer than 18 taps of + from the start (1.6), the map's own limit, where streets and doodles still show, so the map is seen moving
+const GUIDE_MAX_ZOOM = 19.6;
 // Mapbox's camera: its vertical field of view (the same in every Mapbox map)
 const MAPBOX_FOV = 0.6435011087932844;
 
@@ -108,9 +110,13 @@ function guideCamera(me: [number, number], there: [number, number], H: number) {
   return { center, zoom, pitch };
 }
 const GUIDE_GAP = 24;
-// your cloud's glide from one position to the next: at least / at most this long; a jump this far isn't glided
-const GLIDE_MIN_MS = 300;
-const GLIDE_MAX_MS = 1500;
+// how often the forests' and parks' doodles catch up while the map keeps moving
+const AREAS_THROTTLE_MS = 1200;
+// Your cloud between positions: it keeps going at your speed and direction (from your last two positions), for up
+// to GLIDE_AHEAD_MAX_MS past the latest one, and eases onto each new one over about GLIDE_EASE_S. A jump further
+// than GLIDE_JUMP_M (a fresh fix far away) isn't glided.
+const GLIDE_AHEAD_MAX_MS = 2500;
+const GLIDE_EASE_S = 0.3;
 const GLIDE_JUMP_M = 200;
 // GPS wander while you stand still: a new position closer than its margin of error (at least / at most this many
 // metres) is ignored, unless the phone says you're moving at walking speed (m/s)
@@ -144,14 +150,19 @@ const MAP_IMAGES = {
   [FLOWER_ICON]: { image: require('@/assets/landmarks/flower.png'), scale: 3 },
   // the compass: a hand-drawn red needle instead of Mapbox's default
   compass: { image: require('@/assets/landmarks/compass.png'), scale: 3 },
+  // the doodles for kinds of places (cafés, shops…)
+  ...STORE_IMAGES,
 };
 Mapbox.setAccessToken(TOKEN);
 
 const START = { centerCoordinate: [-123.11, 49.28], zoomLevel: 1.6 };
 const LOCATE_ZOOM = 15;
-// how far out and in the map goes, by pinch or by the − / + buttons (out: the whole globe with space around it)
+// Focus: how close tap 1 (and tap 3, back from 3D) shows you, flat
+const FOCUS_ZOOM = 16;
+// how far out and in the map goes, by pinch or by the − / + buttons (out: the whole globe with space around it;
+// in: 18 taps of + from the start view at 1.6, three taps into 3D)
 const MIN_ZOOM = 0.8;
-const MAX_ZOOM = 22;
+const MAX_ZOOM = 19.6;
 // The map starts at zoom 1.6 and each + adds 1: taps 1–15 (up to 16.6) are always flat and can't be tilted;
 // from tap 16 (17.6) in, the map tilts to 3D on its own.
 const TILT_ZOOM = 17.5;
@@ -176,6 +187,16 @@ export function MapScreen() {
     screenRef.current = screen;
   }, [screen]);
   const mapRef = useRef<MapView>(null);
+  // the little trees and flowers filling forests and parks (components/map/AreaDoodles)
+  const { shape: areaShape, refresh: refreshAreaDoodles } = useAreaDoodles(mapRef);
+  const lastAreasRef = useRef(0);
+  const refreshAreas = useCallback(
+    (view: { zoom: number; bounds: { ne: number[]; sw: number[] } }) => {
+      lastAreasRef.current = Date.now();
+      refreshAreaDoodles(view);
+    },
+    [refreshAreaDoodles],
+  );
   const cameraRef = useRef<Camera>(null);
   const [showPuck, setShowPuck] = useState(false);
   // Mapbox reads the custom compass image from the style right when the style loads, before our images are
@@ -196,16 +217,17 @@ export function MapScreen() {
     // every metre or so (GPS-grade), so your cloud has a steady stream of positions to glide along. Standing
     // still, GPS wanders by several metres; that's not you moving, so a new position only counts if it's further
     // than its own margin of error (or you're walking, by the phone's own speed reading), or much more precise.
-    let kept: { at: [number, number]; accuracy: number } | null = null;
+    let kept: { at: [number, number]; accuracy: number; walking: boolean } | null = null;
     Location.watchPositionAsync({ accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 1 }, (pos) => {
       const at: [number, number] = [pos.coords.longitude, pos.coords.latitude];
       const accuracy = pos.coords.accuracy ?? STILL_MIN_M;
       const walking = (pos.coords.speed ?? 0) >= WALKING_MPS;
-      if (kept && !walking && accuracy > kept.accuracy / 2) {
+      // (the first position after you stop always counts, so a cloud still gliding on at your old speed comes back)
+      if (kept && !walking && !kept.walking && accuracy > kept.accuracy / 2) {
         const margin = Math.min(STILL_MAX_M, Math.max(STILL_MIN_M, accuracy));
         if (distanceM(kept.at, at) < margin) return;
       }
-      kept = { at, accuracy };
+      kept = { at, accuracy, walking };
       setUserLocation(at);
     }).then((s) => {
       if (cancelled) s.remove();
@@ -270,9 +292,10 @@ export function MapScreen() {
       animationDuration: 0,
     });
   }, []);
-  // Where your cloud is drawn: it glides from each position to the next (like a navigation app) instead of
-  // jumping, taking about as long as the last position took to arrive, so it moves at your pace. It's sent straight
-  // to the cloud's marker (not through this screen's state), so the map isn't redrawn every frame.
+  // Where your cloud is drawn: like a navigation app, it doesn't jump from position to position or wait for the next
+  // one; it keeps moving at your speed and direction in between, and eases onto each new position as it comes, so
+  // it keeps pace with you whether you walk or drive. It's sent straight to the cloud's marker (not through this
+  // screen's state), so the map isn't redrawn every frame.
   const shownRef = useRef<[number, number] | null>(null);
   const shownListeners = useRef(new Set<(at: [number, number]) => void>());
   const subscribeShown = useCallback((fn: (at: [number, number]) => void) => {
@@ -280,32 +303,51 @@ export function MapScreen() {
     if (shownRef.current) fn(shownRef.current);
     return () => void shownListeners.current.delete(fn);
   }, []);
-  const lastFixAtRef = useRef(0);
+  // the latest position, when it came, and your velocity (degrees per second) worked out from the one before
+  const fixRef = useRef<{ at: [number, number]; t: number; v: [number, number]; ahead: number } | null>(null);
+  const glideFrame = useRef(0);
   useEffect(() => {
     if (!userLocation) return;
     const now = Date.now();
-    const gap = now - lastFixAtRef.current;
-    lastFixAtRef.current = now;
     const show = (at: [number, number]) => {
       shownRef.current = at;
       shownListeners.current.forEach((fn) => fn(at));
       followGuide(at);
     };
-    const from = shownRef.current;
-    // the first position, or a big jump (a fresh fix far from the last): just be there
-    if (!from || distanceM(from, userLocation) > GLIDE_JUMP_M) return void show(userLocation);
-    const to = userLocation;
-    const duration = Math.min(GLIDE_MAX_MS, Math.max(GLIDE_MIN_MS, gap));
-    let frame = 0;
+    const prev = fixRef.current;
+    const jumped = !shownRef.current || distanceM(shownRef.current, userLocation) > GLIDE_JUMP_M;
+    const dt = prev ? (now - prev.t) / 1000 : 0;
+    let v: [number, number] = [0, 0];
+    if (prev && !jumped && dt > 0.2 && dt < 5) {
+      const raw: [number, number] = [(userLocation[0] - prev.at[0]) / dt, (userLocation[1] - prev.at[1]) / dt];
+      // a little smoothing, so one wobbly position doesn't swing the cloud off course
+      v = [raw[0] * 0.7 + prev.v[0] * 0.3, raw[1] * 0.7 + prev.v[1] * 0.3];
+    }
+    // keep going for about as long as positions are taking to come, then wait for the next one
+    const ahead = Math.min(GLIDE_AHEAD_MAX_MS, Math.max(1000, (dt || 1) * 1500));
+    fixRef.current = { at: userLocation, t: now, v, ahead };
+    if (jumped) return void show(userLocation);
+    if (glideFrame.current) return; // already running: it picks up the new position
+    let last = now;
     const step = () => {
-      const t = Math.min(1, (Date.now() - now) / duration);
-      show([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]);
-      if (t < 1) frame = requestAnimationFrame(step);
+      const fix = fixRef.current;
+      const from = shownRef.current;
+      if (!fix || !from) return void (glideFrame.current = 0);
+      const t = Date.now();
+      // where you'd be by now at your speed (or just the latest position, standing still)
+      const k = Math.min(t - fix.t, fix.ahead) / 1000;
+      const target: [number, number] = [fix.at[0] + fix.v[0] * k, fix.at[1] + fix.v[1] * k];
+      // ease the cloud toward it (frame-rate independent)
+      const a = 1 - Math.exp(-(t - last) / 1000 / GLIDE_EASE_S);
+      last = t;
+      const next: [number, number] = [from[0] + (target[0] - from[0]) * a, from[1] + (target[1] - from[1]) * a];
+      show(next);
+      const settled = distanceM(next, target) < 0.05 && (t - fix.t >= fix.ahead || (fix.v[0] === 0 && fix.v[1] === 0));
+      glideFrame.current = settled ? 0 : requestAnimationFrame(step);
     };
-    frame = requestAnimationFrame(step);
-    // a newer position takes over from wherever the cloud is now
-    return () => cancelAnimationFrame(frame);
+    glideFrame.current = requestAnimationFrame(step);
   }, [userLocation, followGuide]);
+  useEffect(() => () => cancelAnimationFrame(glideFrame.current), []);
   const pitchRef = useRef(0);
   const [inSpace, setInSpace] = useState(START.zoomLevel < SPACE_ZOOM);
 
@@ -518,8 +560,10 @@ export function MapScreen() {
         heading: state.properties.heading,
       };
       if (Date.now() - lastQueryRef.current > CLUSTER_THROTTLE_MS) updateItems();
+      // the map can keep moving for a long while (following you as you walk), so the trees catch up as it goes
+      if (Date.now() - lastAreasRef.current > AREAS_THROTTLE_MS) refreshAreas(state.properties);
     },
-    [setMode, updateItems],
+    [setMode, updateItems, refreshAreas],
   );
 
   const onMapIdle = useCallback(
@@ -530,6 +574,7 @@ export function MapScreen() {
         heading: state.properties.heading,
       };
       updateItems();
+      refreshAreas(state.properties);
       // once the map settles (after a pinch, a + / − tap or a fly-to), tilt or flatten for its zoom
       // (no auto-tilt while the posting animation plays: it's laid out for the flat, centered map)
       if (celebratingRef.current || guidingRef.current) return;
@@ -539,7 +584,7 @@ export function MapScreen() {
         cameraRef.current?.setCamera({ pitch: want, animationMode: 'easeTo', animationDuration: 500 });
       }
     },
-    [updateItems, holdFollow],
+    [updateItems, holdFollow, refreshAreas],
   );
 
   // waits for the map and your location, then lines them up and draws the arrow (see `guide` above)
@@ -616,7 +661,7 @@ export function MapScreen() {
     }
     if (mode === 'tilted') {
       holdFollow(900);
-      cameraRef.current?.setCamera({ ...center, zoomLevel: LOCATE_ZOOM, pitch: 0, animationMode: 'easeTo', animationDuration: 900 });
+      cameraRef.current?.setCamera({ ...center, zoomLevel: FOCUS_ZOOM, pitch: 0, animationMode: 'easeTo', animationDuration: 900 });
       setMode('located');
       return;
     }
@@ -625,7 +670,7 @@ export function MapScreen() {
     if (!here) return;
     setShowPuck(true);
     const zoom = (await mapRef.current?.getZoom()) ?? 0;
-    const target = Math.max(zoom, LOCATE_ZOOM);
+    const target = Math.max(zoom, FOCUS_ZOOM);
     const duration = zoom < 8 ? 2500 : 1200;
     holdFollow(duration);
     cameraRef.current?.setCamera({
@@ -698,6 +743,7 @@ export function MapScreen() {
         />
         <Images images={MAP_IMAGES} />
         <CanvasLayers />
+        <AreaDoodles shape={areaShape} />
         <LandmarkLayer />
         {!viewingPost &&
           items.map((item) =>
