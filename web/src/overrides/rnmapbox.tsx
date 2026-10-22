@@ -141,12 +141,82 @@ function MaxPitch({ value }: { value: number }) {
   return null;
 }
 
+// While the map follows you (Focus, the notification guide), whim moves it every frame, and each move cancels any
+// touch on the map in progress, so a drag never gets far enough to count and the map can't tell you touched it.
+// So a finger (or mouse, or trackpad) moving on the map is reported straight away as a gesture, which ends the
+// following; from then on the map is yours as usual. (A tap that doesn't move isn't a gesture.)
+const DRAG_PX = 4;
+function GestureWatch({ onGesture }: { onGesture?: (state: unknown) => void }) {
+  const { map } = useContext(MapContext) as { map?: any };
+  const latest = useRef(onGesture);
+  useEffect(() => {
+    latest.current = onGesture;
+  }, [onGesture]);
+  useEffect(() => {
+    if (!map) return;
+    const canvas: HTMLElement = map.getCanvasContainer();
+    let start: { x: number; y: number } | null = null;
+    const report = () => {
+      const c = map.getCenter();
+      const b = map.getBounds();
+      latest.current?.({
+        properties: {
+          center: [c.lng, c.lat],
+          bounds: { ne: [b.getEast(), b.getNorth()], sw: [b.getWest(), b.getSouth()] },
+          zoom: map.getZoom(),
+          heading: map.getBearing(),
+          pitch: map.getPitch(),
+        },
+        gestures: { isGestureActive: true },
+        timestamp: Date.now(),
+      });
+    };
+    const point = (e: TouchEvent | MouseEvent) => ('touches' in e ? e.touches[0] : e);
+    const down = (e: TouchEvent | MouseEvent) => {
+      const p = point(e);
+      start = p ? { x: p.clientX, y: p.clientY } : null;
+      // two fingers: a pinch or a turn
+      if ('touches' in e && e.touches.length > 1) report();
+    };
+    const move = (e: TouchEvent | MouseEvent) => {
+      const p = point(e);
+      if (!start || !p) return;
+      if (Math.hypot(p.clientX - start.x, p.clientY - start.y) > DRAG_PX) {
+        start = null;
+        report();
+      }
+    };
+    const up = () => {
+      start = null;
+    };
+    const opts = { passive: true, capture: true } as const;
+    canvas.addEventListener('touchstart', down, opts);
+    canvas.addEventListener('mousedown', down, opts);
+    canvas.addEventListener('touchmove', move, opts);
+    canvas.addEventListener('mousemove', move, opts);
+    canvas.addEventListener('touchend', up, opts);
+    canvas.addEventListener('mouseup', up, opts);
+    canvas.addEventListener('wheel', report, opts);
+    return () => {
+      canvas.removeEventListener('touchstart', down, opts);
+      canvas.removeEventListener('mousedown', down, opts);
+      canvas.removeEventListener('touchmove', move, opts);
+      canvas.removeEventListener('mousemove', move, opts);
+      canvas.removeEventListener('touchend', up, opts);
+      canvas.removeEventListener('mouseup', up, opts);
+      canvas.removeEventListener('wheel', report, opts);
+    };
+  }, [map]);
+  return null;
+}
+
 const RealMapView = MapboxGL.MapView as unknown as React.ComponentType<Record<string, unknown>>;
 export const MapView = forwardRef<unknown, ComponentProps<typeof MapboxGL.MapView>>(function MapView(props, ref) {
-  const { children, compassEnabled, compassPosition, compassFadeWhenNorth, maxPitch } = props as Record<string, any>;
+  const { children, compassEnabled, compassPosition, compassFadeWhenNorth, maxPitch, onCameraChanged } = props as Record<string, any>;
   return (
     <RealMapView {...props} ref={ref}>
       {children}
+      <GestureWatch onGesture={onCameraChanged} />
       {maxPitch != null && <MaxPitch value={maxPitch} />}
       {compassEnabled !== false && <WebCompass position={compassPosition} fadeWhenNorth={compassFadeWhenNorth} />}
     </RealMapView>

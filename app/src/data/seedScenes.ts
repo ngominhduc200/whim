@@ -767,3 +767,20 @@ export const SEED_SCENES: Scene[] = [
     ],
   },
 ];
+
+// A sample moment of its own (not one of the photos above): the Empire State Building at golden hour, seen up a
+// Manhattan street (assets/seed-photos/nyc-empire.jpg, from app/Photos/NYC.png). The tower is the one smiling.
+export const EMPIRE_SCENE: Scene = {
+  draw: (k) => {
+    k.glow(0.495, 0.085, 0.05, C.yellow, 6);
+    k.face(0.495, 0.37, 0.055, C.white, 'joy', C.pink);
+    k.arms(0.495, 0.47, 0.07, 1.1, C.white, 'cheer');
+    k.flyingBird(0.72, 0.2, 0.03, C.white);
+    k.flyingBird(0.8, 0.15, 0.025, C.white, true);
+    k.heart(0.3, 0.18, 0.035, C.pink);
+  },
+  captions: [
+    'Golden hour in Midtown, and the Empire State is showing off again. It knows the whole street is looking.',
+    "The tallest one on the block caught the last of the sun and won't give it back.",
+  ],
+};

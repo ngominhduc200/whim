@@ -33,8 +33,6 @@ export function requestForegroundPermissionsAsync(): Promise<Permission> {
         keepTracking();
         rememberGranted('location');
         resolve((decided = perm(true, true)));
-        // the demo's nearby moment, placed once whim knows where you are
-        import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
       },
       (e) => {
         noteError(e);

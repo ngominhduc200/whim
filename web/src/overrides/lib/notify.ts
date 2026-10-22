@@ -58,12 +58,12 @@ export async function isNearbyRepeatOn() {
 export async function updateNearbyRepeat() {
   if (!remembered()) return;
   start();
-  import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
+  import('@/lib/nearbyMoment').then((m) => m.ensureNearbyMoment());
 }
 
 export async function setNearbyRepeat(on: boolean) {
-  // a moment about 50 m from you for the notification to point to
-  if (on) import('@/web/nearbyMoment').then((m) => m.ensureNearbyMoment());
+  // a new moment near you for the notification to point to (the last one goes)
+  if (on) import('@/lib/nearbyMoment').then((m) => m.spawnNearbyMoment());
   try {
     localStorage.setItem(ON_KEY, on ? '1' : '0');
   } catch {}

@@ -1,30 +1,51 @@
-// whim on the web. On a wide screen: a landing page with the app running inside a phone-shaped frame (the app icon on
-// the left and the name on the right, which drop away as the window narrows). Inside that frame, and on a phone's
-// own browser, it's simply the app.
+// whim on the web. On a wide screen: a landing page with the app running inside a phone-shaped frame over a street
+// photo, with "whim" to its left and "reimagine · your world" to its right (they drop away as the window narrows).
+// Inside that frame, and on a phone's own browser, it's simply the app.
 import { useEffect, useState } from 'react';
-import { Image, Text as RNText, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
 
 import AppLayout from '@/app/_layout';
-import { FONTS, useAppFonts } from '@/components/Text';
 import { INK } from '@/lib/colors';
 import { NotificationBanner } from '@/web/NotificationBanner';
 
 // an iPhone 15's screen, in points
 const SCREEN_W = 393;
 const SCREEN_H = 852;
-// around it, just an ink outline (no phone bezel), the same 4pt as the app icon's at any window size
-const BORDER = 4;
+// around it, just a see-through ink outline (no phone bezel), 5pt at any window size
+const BORDER = 5;
 const RADIUS = 52;
 // iPhone safe areas (the status bar with the Dynamic Island, and the home indicator)
 const PHONE_INSETS = { top: 54, bottom: 34, left: 0, right: 0 };
 // below this width there's no room for the frame (a phone's browser, or a narrow window): just the app, full bleed
 const PHONE_BROWSER = 700;
-// below this width the icon and name drop away, leaving the phone
+// below this width the words drop away, leaving the phone
 const SIDES_FROM = 1000;
 const BG = '#FDF2E1';
-// the warm brown of the app icon's and the screen's outlines, and the name
-const OUTLINE = '#72625A';
+// bump when public/web-background.jpg is replaced, so browsers load the new photo instead of a cached one
+const BG_VERSION = 2;
+// the screen's outline: black at 35%, so the photo shows through it
+const OUTLINE = 'rgba(0, 0, 0, 0.35)';
+// the words beside the phone: Fragment Mono (Google Fonts), white over the photo; 18px in a window WORDS_FULL_AT wide
+// or wider, shrinking with the window below that (about 11px by the time they drop away, at SIDES_FROM)
+const WORDS_FONT = '"Fragment Mono", ui-monospace, monospace';
+const WORDS_SIZE = 18;
+const WORDS_FULL_AT = 1600;
+
+// Fragment Mono, from Google Fonts (the landing page only; the app inside the frame uses Gaegu)
+function useWordsFont() {
+  useEffect(() => {
+    if (document.getElementById('fragment-mono')) return;
+    const add = (attrs: Record<string, string>) => {
+      const link = document.createElement('link');
+      for (const [k, v] of Object.entries(attrs)) link.setAttribute(k, v);
+      document.head.appendChild(link);
+    };
+    add({ rel: 'preconnect', href: 'https://fonts.googleapis.com' });
+    add({ rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' });
+    add({ id: 'fragment-mono', rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Fragment+Mono:ital@0;1&display=swap' });
+  }, []);
+}
 
 const embedded = typeof window !== 'undefined' && (window.self !== window.top || new URLSearchParams(window.location.search).has('app'));
 
@@ -52,23 +73,20 @@ export default function WebRoot() {
 
 function Landing() {
   const { width, height } = useWindowDimensions();
-  const fonts = useAppFonts();
+  useWordsFont();
   // the screen shrinks to fit a short window; the outline around it stays 4pt
   const scale = Math.min(1, (height - 48 - 2 * BORDER) / SCREEN_H);
   const sides = width >= SIDES_FROM;
-  // the icon and the name grow and shrink with the window (full size from ~1500pt wide)
-  const side = Math.min(1, Math.max(0.6, width / 1500));
-  const iconSize = Math.round(180 * side);
-  // (Gaegu draws small for its size; the app's Text scales it up by 1.15, so the same here)
-  const wordSize = Math.round(76 * 1.15 * side);
+  const words = { ...wordsStyle, fontSize: Math.round(WORDS_SIZE * Math.min(1, width / WORDS_FULL_AT) * 10) / 10 };
   const appUrl = `${window.location.pathname}?app=1`;
   return (
     <View style={styles.page}>
-      {/* the painted lake behind it all (public/web-background.jpg, a web-sized copy of web-background.png) */}
-      <Image source={{ uri: '/web-background.jpg' }} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityIgnoresInvertColors />
+      {/* the street photo behind it all (public/web-background.jpg, a web-sized copy of web-background.png) */}
+      <Image source={{ uri: `/web-background.jpg?v=${BG_VERSION}` }} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityIgnoresInvertColors />
+      {/* left: "whim", centered between the window's edge and the phone */}
       {sides && (
         <View style={styles.side}>
-          <Image source={require('@/assets/images/app-icon.png')} style={[styles.icon, { width: iconSize, height: iconSize, borderRadius: Math.round(40 * side) }]} accessibilityLabel="whim" />
+          <span style={words}>whim</span>
         </View>
       )}
       <View style={[styles.frame, { width: SCREEN_W * scale + 2 * BORDER, height: SCREEN_H * scale + 2 * BORDER, borderRadius: RADIUS * scale + BORDER }]}>
@@ -77,8 +95,12 @@ function Landing() {
           <StatusBar />
         </View>
       </View>
+      {/* right: "reimagine" and "your world", with the same space between the phone, each, and the window's edge */}
       {sides && (
-        <View style={styles.side}>{fonts ? <RNText style={[styles.wordmark, { fontSize: wordSize }]}>whim</RNText> : null}</View>
+        <View style={[styles.side, styles.rightSide]}>
+          <span style={words}>reimagine</span>
+          <span style={words}>your world</span>
+        </View>
       )}
     </View>
   );
@@ -118,16 +140,16 @@ function StatusBar() {
 }
 
 const iframeStyle = { border: 0, width: SCREEN_W, height: SCREEN_H, display: 'block' as const };
+const wordsStyle = { fontFamily: WORDS_FONT, color: '#fff', whiteSpace: 'nowrap' as const };
 const timeStyle = { fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif', fontWeight: 600, fontSize: 16, color: INK };
 
 const styles = StyleSheet.create({
   page: { flex: 1, minHeight: '100%', backgroundColor: BG, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
   side: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  icon: { borderWidth: BORDER, borderColor: OUTLINE },
-  wordmark: { color: OUTLINE, fontFamily: FONTS.regular },
-  // the outline's color behind the app too, so no light sliver shows where the screen meets the outline
-  frame: { borderWidth: BORDER, borderColor: OUTLINE, overflow: 'hidden', backgroundColor: OUTLINE },
-  screen: { width: SCREEN_W, height: SCREEN_H, transformOrigin: 'top left', borderRadius: RADIUS, overflow: 'hidden', backgroundColor: OUTLINE },
+  rightSide: { flexDirection: 'row', justifyContent: 'space-evenly' },
+  // (nothing filled behind the see-through outline, so it stays see-through)
+  frame: { borderWidth: BORDER, borderColor: OUTLINE, overflow: 'hidden' },
+  screen: { width: SCREEN_W, height: SCREEN_H, transformOrigin: 'top left', borderRadius: RADIUS, overflow: 'hidden' },
   statusBar: {
     position: 'absolute',
     top: 0,

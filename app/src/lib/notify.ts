@@ -1,6 +1,8 @@
 import * as DevClient from 'expo-dev-client';
 import * as Notifications from 'expo-notifications';
 
+import { spawnNearbyMoment } from '@/lib/nearbyMoment';
+
 // Local notifications only (no push server), for previewing how the "a moment nearby" alert looks on the lock
 // screen: on demand from the dev menu, or every minute from the settings toggle. iOS shows the app's name
 // ("whim") above the text.
@@ -70,6 +72,8 @@ export async function setNearbyRepeat(on: boolean) {
   const current = await Notifications.getPermissionsAsync();
   const granted = current.granted || (await Notifications.requestPermissionsAsync()).granted;
   if (!granted) return false;
+  // a new moment near you for it to point to (the last one goes)
+  void spawnNearbyMoment();
   // one right away (a few seconds, time to lock the phone), so you can see it's on, then every minute
   await sendNearbyMoment();
   await scheduleRepeat();

@@ -91,6 +91,25 @@ export async function clearPosts() {
   emit(null);
 }
 
+/** Deletes one stored post (and its photo file). */
+export async function removePost(id: string) {
+  const all = await loadPosts();
+  const post = all.find((p) => p.id === id);
+  if (!post) return;
+  if (post.photo) {
+    try {
+      const file = new File(photosDir(), post.photo);
+      if (file.exists) file.delete();
+    } catch {
+      // a leftover file is harmless
+    }
+  }
+  const kept = all.filter((p) => p.id !== id);
+  await AsyncStorage.setItem(KEY, JSON.stringify(kept));
+  cache = kept;
+  emit(null);
+}
+
 export function getPost(id: string): Post | undefined {
   return cache?.find((p) => p.id === id) ?? SEED_POSTS_BY_ID.get(id);
 }

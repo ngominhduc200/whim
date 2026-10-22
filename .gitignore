@@ -5,3 +5,7 @@ node_modules/
 !.env.example
 # the original photos the sample photos were made from (personal, 77 MB); the app uses assets/seed-photos
 app/photos/
+
+# full-size originals of the web background (the page uses web/public/web-background.jpg)
+web/web-background.png
+web/web-background-full.jpg

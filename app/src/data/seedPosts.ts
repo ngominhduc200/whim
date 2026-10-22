@@ -5,7 +5,7 @@ import type { Stroke } from '@/lib/strokes';
 
 import { makeKit } from './doodleKit';
 import { SEED_PHOTOS } from './seedPhotos';
-import { SEED_SCENES } from './seedScenes';
+import { EMPIRE_SCENE, SEED_SCENES, type Scene } from './seedScenes';
 
 // mulberry32: small deterministic PRNG
 function rng(seed: number) {
@@ -107,9 +107,9 @@ const MY = 48 / 363;
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** The photo's scene (data/seedScenes.ts), drawn with this post's own slight hand wobble. */
-function sceneStrokes(postId: string, photo: number): Stroke[] {
+function sceneStrokes(postId: string, photo: number | Scene): Stroke[] {
   const kit = makeKit(rand, postId);
-  SEED_SCENES[photo].draw(kit);
+  (typeof photo === 'number' ? SEED_SCENES[photo] : photo).draw(kit);
   // every point stays inside the drawing canvas
   return kit.strokes.map((st) => ({
     ...st,
@@ -146,5 +146,23 @@ function generate(): Post[] {
   return posts;
 }
 
-export const SEED_POSTS: Post[] = generate();
+// Moments with a photo and doodles of their own, in a set spot (made after the generated ones, so those keep theirs)
+const PLACED: { id: string; lat: number; lng: number; photo: number; scene: Scene }[] = [
+  // Manhattan: the Empire State at golden hour, from a street a block southwest of it
+  { id: 'seed-nyc-empire', lat: 40.7467, lng: -73.988, photo: require('@/assets/seed-photos/nyc-empire.jpg'), scene: EMPIRE_SCENE },
+];
+
+export const SEED_POSTS: Post[] = [
+  ...generate(),
+  ...PLACED.map(({ id, lat, lng, photo, scene }) => ({
+    id,
+    photo: '',
+    asset: photo,
+    strokes: sceneStrokes(id, scene),
+    text: scene.captions[0],
+    lat,
+    lng,
+    createdAt: 0,
+  })),
+];
 export const SEED_POSTS_BY_ID = new Map(SEED_POSTS.map((p) => [p.id, p]));

@@ -5,7 +5,7 @@ import { router, useFocusEffect } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -22,6 +22,7 @@ import { PIN_ANCHOR, PIN_WIDTH, PostPin } from '@/components/map/PostPin';
 import { onPostViewClosing } from '@/lib/postView';
 import { USER_CLOUD_HEIGHT, USER_CLOUD_WIDTH, USER_MARKER_ANCHOR, UserMarker } from '@/components/map/UserMarker';
 import { GuideArrow } from '@/components/map/GuideArrow';
+import { nearbyMomentId } from '@/lib/nearbyMoment';
 import { onNotificationTap } from '@/lib/notify';
 import { SEED_POSTS } from '@/data/seedPosts';
 import { STORE_IMAGES } from '@/data/storeIcons';
@@ -118,6 +119,11 @@ const AREAS_THROTTLE_MS = 1200;
 const GLIDE_AHEAD_MAX_MS = 2500;
 const GLIDE_EASE_S = 0.3;
 const GLIDE_JUMP_M = 200;
+// For now: within this far of you, only one of others' pins shows (the notification's nearby moment, or else the
+// closest), so where you are isn't crowded; the rest are hidden, not deleted. Your own posts always show. Worked
+// out again every ~10 m you move (your position rounded to a 0.0001° grid).
+const CLEAR_AROUND_M = 50;
+const CLEAR_GRID = 1e4;
 // Focus on the phone: the map's own "follow me" camera (it smooths your position and moves the map natively, every
 // frame, so it keeps pace with you even driving). The browser map has no such mode, so the web follows you itself.
 const NATIVE_FOLLOW = Platform.OS !== 'web';
@@ -132,7 +138,7 @@ const WALKING_MPS = 0.5;
 const STEADY_HEADING_M = 12;
 
 /** Your cloud, at wherever its glide has got to (it re-renders on its own, every frame it moves). */
-function GlidingUserMarker({ subscribe }: { subscribe: (fn: (at: [number, number]) => void) => () => void }) {
+function GlidingUserMarker({ subscribe, hidden }: { subscribe: (fn: (at: [number, number]) => void) => () => void; hidden: boolean }) {
   const [at, setAt] = useState<[number, number] | null>(null);
   useEffect(() => subscribe(setAt), [subscribe]);
   // the same element every frame, so the cloud itself isn't redrawn, only moved
@@ -141,7 +147,10 @@ function GlidingUserMarker({ subscribe }: { subscribe: (fn: (at: [number, number
   return (
     // "selected" keeps your location drawn above the post pins
     <MarkerView coordinate={at} anchor={USER_MARKER_ANCHOR} allowOverlap allowOverlapWithPuck isSelected>
-      {cloud}
+      {/* (hidden, not removed, while the follow camera's cloud is shown: a removed marker takes a moment to come back) */}
+      <View style={hidden && styles.hiddenCloud} pointerEvents={hidden ? 'none' : 'box-none'}>
+        {cloud}
+      </View>
     </MarkerView>
   );
 }
@@ -274,6 +283,16 @@ export function MapScreen() {
   const [followZoom, setFollowZoom] = useState(FOCUS_ZOOM);
   const followZoomRef = useRef(FOCUS_ZOOM);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // a camera move waiting for the follow camera to let go (it ignores camera moves while it's on)
+  const afterFollowRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (nativeFollowing || !afterFollowRef.current) return;
+    const move = afterFollowRef.current;
+    afterFollowRef.current = null;
+    // a frame later, so the map has switched following off before the move arrives
+    const frame = requestAnimationFrame(move);
+    return () => cancelAnimationFrame(frame);
+  }, [nativeFollowing]);
   const setNativeFollow = useCallback((on: boolean, zoom?: number) => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
     settleTimer.current = null;
@@ -284,6 +303,14 @@ export function MapScreen() {
     nativeFollowingRef.current = on;
     setNativeFollowing(on);
   }, []);
+  const setMode = useCallback(
+    (mode: FocusMode) => {
+      focusModeRef.current = mode;
+      setFocusMode(mode);
+      if (mode === 'free') setNativeFollow(false);
+    },
+    [setNativeFollow],
+  );
   // while a post is open, the map stays put (the photo lands back on its pin)
   const viewingPostRef = useRef(false);
   // the map's own moves (Focus, + / −, the auto-tilt) play out before following takes over again
@@ -328,6 +355,18 @@ export function MapScreen() {
   }, []);
   // the latest position, when it came, and your velocity (degrees per second) worked out from the one before
   const fixRef = useRef<{ at: [number, number]; t: number; v: [number, number]; ahead: number } | null>(null);
+  // When the follow camera lets go (you moved the map, or Focus ended), your cloud goes back on the map exactly
+  // where it stood on screen, the follow camera's idea of where you are, and eases from there to the app's own,
+  // instead of jumping between the two. (A layout effect, so the cloud's marker starts out there.)
+  const followCenterRef = useRef<[number, number] | null>(null);
+  useLayoutEffect(() => {
+    const at = followCenterRef.current;
+    if (nativeFollowing || !at) return;
+    followCenterRef.current = null;
+    shownRef.current = at;
+    shownListeners.current.forEach((fn) => fn(at));
+    if (fixRef.current) fixRef.current = { ...fixRef.current, at, t: Date.now() };
+  }, [nativeFollowing]);
   const glideFrame = useRef(0);
   useEffect(() => {
     if (!userLocation) return;
@@ -399,19 +438,24 @@ export function MapScreen() {
     const all = [post, ...allPostsRef.current.filter((p) => p.id !== post.id)];
     const solo = buildClusters(all).soloZoom(post.id, screenRef.current, from);
     const zoom = solo === from && current >= LOCATE_ZOOM ? current : solo + 0.25;
-    cameraRef.current?.setCamera({
-      centerCoordinate: [post.lng, post.lat],
-      zoomLevel: zoom,
-      animationMode: 'moveTo',
-      animationDuration: 0,
-    });
-    focusModeRef.current = 'free';
-    setFocusMode('free');
+    const centerOnPost = () =>
+      cameraRef.current?.setCamera({
+        centerCoordinate: [post.lng, post.lat],
+        zoomLevel: zoom,
+        animationMode: 'moveTo',
+        animationDuration: 0,
+      });
+    // Focus ends here; if the map's own follow camera was keeping you in the middle, it has to let go first (it
+    // ignores any other camera move while it's on), so the map moves to the post once it has
+    const wasFollowing = nativeFollowingRef.current;
+    setMode('free');
+    if (wasFollowing) afterFollowRef.current = centerOnPost;
+    else centerOnPost();
     setHiddenPin(post.id);
     celebratingRef.current = true;
     setCelebrationLeaving(false);
     setCelebrating(post);
-  }, [stopFollowing]);
+  }, [stopFollowing, setMode]);
   const revealPin = useCallback(() => setHiddenPin(null), []);
 
   const endCelebration = useCallback(() => {
@@ -420,7 +464,23 @@ export function MapScreen() {
   }, []);
   const posts = usePosts(onPostAdded);
   // your posts first, so a cluster's front photo is one of yours when it has any
-  const allPosts = useMemo(() => [...posts, ...SEED_POSTS], [posts]);
+  const clearLng = userLocation ? Math.round(userLocation[0] * CLEAR_GRID) / CLEAR_GRID : null;
+  const clearLat = userLocation ? Math.round(userLocation[1] * CLEAR_GRID) / CLEAR_GRID : null;
+  const allPosts = useMemo(() => {
+    const all = [...posts, ...SEED_POSTS];
+    if (clearLng == null || clearLat == null) return all;
+    const here: [number, number] = [clearLng, clearLat];
+    const near = all
+      .map((p) => ({ p, d: distanceM(here, [p.lng, p.lat]) }))
+      // your own posts always show
+      .filter(({ p, d }) => d <= CLEAR_AROUND_M && !isOwnPost(p))
+      .sort((a, b) => a.d - b.d);
+    if (near.length <= 1) return all;
+    // the moment the notification points to (put down when notifications were switched on) is the one kept
+    const keep = near.find(({ p }) => p.id === nearbyMomentId()) ?? near[0];
+    const hidden = new Set(near.filter((n) => n !== keep).map(({ p }) => p.id));
+    return all.filter((p) => !hidden.has(p.id));
+  }, [posts, clearLng, clearLat]);
 
   useEffect(() => {
     allPostsRef.current = allPosts;
@@ -536,14 +596,6 @@ export function MapScreen() {
     [showPost, stopFollowing],
   );
 
-  const setMode = useCallback(
-    (mode: FocusMode) => {
-      focusModeRef.current = mode;
-      setFocusMode(mode);
-      if (mode === 'free') setNativeFollow(false);
-    },
-    [setNativeFollow],
-  );
 
   // The native splash hides right away; the doodle loader covers the map until its style has loaded, then fades.
   const [mapReady, setMapReady] = useState(false);
@@ -561,6 +613,8 @@ export function MapScreen() {
   const onCameraChanged = useCallback(
     (state: MapState) => {
       pitchRef.current = state.properties.pitch;
+      // following you: the middle of the map is where you are (where your cloud stands on screen)
+      if (nativeFollowingRef.current) followCenterRef.current = state.properties.center as [number, number];
       setCanTilt(state.properties.zoom >= TILT_ZOOM);
       setInSpace(state.properties.zoom < SPACE_ZOOM);
       if (state.gestures.isGestureActive && focusModeRef.current !== 'free') setMode('free');
@@ -788,7 +842,7 @@ export function MapScreen() {
         {NATIVE_FOLLOW && showPuck && (
           <LocationPuck topImage={BLANK_PUCK} bearingImage={BLANK_PUCK} shadowImage={BLANK_PUCK} puckBearingEnabled={false} pulsing={{ isEnabled: false }} />
         )}
-        {showPuck && userLocation && !viewingPost && !nativeFollowing && <GlidingUserMarker subscribe={subscribeShown} />}
+        {showPuck && userLocation && !viewingPost && <GlidingUserMarker subscribe={subscribeShown} hidden={nativeFollowing} />}
         {/* the basemap flattened to one canvas color (theme 'custom' isn't in the library's types yet) */}
         <StyleImport id="basemap" existing config={STANDARD_CONFIG as never} />
         {/* the globe floats in dark, starry space; zoomed in, the horizon fades into the canvas */}
@@ -852,10 +906,15 @@ export function MapScreen() {
       </MapView>
       {/* following you (phone): the follow camera keeps you at the middle of the screen, so your cloud (the same one,
           tap it for "You") stands there while the map moves under it */}
-      {nativeFollowing && !viewingPost && showPuck && (
+      {/* (always there, only shown while following: switching which cloud shows is then instant, in one frame) */}
+      {NATIVE_FOLLOW && !viewingPost && showPuck && (
         <View
-          pointerEvents="box-none"
-          style={[styles.followedCloud, { left: screen.width / 2 - USER_CLOUD_WIDTH / 2, top: screen.height / 2 - USER_CLOUD_HEIGHT }]}
+          pointerEvents={nativeFollowing ? 'box-none' : 'none'}
+          style={[
+            styles.followedCloud,
+            { left: screen.width / 2 - USER_CLOUD_WIDTH / 2, top: screen.height / 2 - USER_CLOUD_HEIGHT },
+            !nativeFollowing && styles.hiddenCloud,
+          ]}
         >
           <UserMarker />
         </View>
@@ -931,6 +990,7 @@ export function MapScreen() {
 
 const styles = StyleSheet.create({
   followedCloud: { position: 'absolute', width: USER_CLOUD_WIDTH, height: USER_CLOUD_HEIGHT },
+  hiddenCloud: { opacity: 0 },
   root: { flex: 1, backgroundColor: '#0d0d0f' },
   abs: { position: 'absolute' },
   // the loader sits on the map's water color, so the map appears under it seamlessly
