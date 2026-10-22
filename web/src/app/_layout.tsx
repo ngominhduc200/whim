@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Image, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaInsetsContext } from 'react-native-safe-area-context';
+import { Analytics } from '@vercel/analytics/react';
 
 import AppLayout from '@/app/_layout';
 import { INK } from '@/lib/colors';
@@ -60,15 +61,22 @@ export default function WebRoot() {
       </SafeAreaInsetsContext.Provider>
     );
   }
+  // Vercel Analytics counts visits on the page itself only, not again for the app inside the phone frame
   if (width < PHONE_BROWSER) {
     return (
       <>
         <AppLayout />
         <NotificationBanner />
+        <Analytics />
       </>
     );
   }
-  return <Landing />;
+  return (
+    <>
+      <Landing />
+      <Analytics />
+    </>
+  );
 }
 
 function Landing() {
